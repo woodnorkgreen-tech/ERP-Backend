@@ -39,6 +39,10 @@ class ProjectMaterialResolutionController extends Controller
         $validated = $request->validate([
             'material_id' => 'nullable|required_without:new_material|prohibits:new_material|integer|exists:library_materials,id',
             'note' => 'nullable|string|max:500',
+            // Stock units in one requirement unit, when the catalogue cannot read it.
+            'factor' => 'nullable|numeric|gt:0|max:1000000',
+            'save_to_material' => 'nullable|boolean',
+            'apply_to_matching' => 'nullable|boolean',
             // Stock is never taken in here (Report 78B Phase 3).
             'receive' => 'prohibited',
             'new_material' => 'nullable|array|required_without:material_id',
@@ -51,7 +55,7 @@ class ProjectMaterialResolutionController extends Controller
             'new_material.base_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'new_material.purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'new_material.issue_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'new_material.uom_conversions' => 'nullable|array|max:2',
+            'new_material.uom_conversions' => 'nullable|array|max:12',
             'new_material.uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
             'new_material.uom_conversions.*.factor' => 'required|numeric|gt:0',
             'new_material.default_unit_cost' => 'nullable|numeric|min:0',
@@ -72,14 +76,35 @@ class ProjectMaterialResolutionController extends Controller
             );
 
             return response()->json([
-                'message' => "Requested \"{$result['material']->material_name}\". It is Under Review until the Material Library custodian activates it; the line stays unlinked until then.",
+                'message' => "Requested \"{$result['material']->material_name}\". It is Under Review until the Material Library custodian activates it; this line links to it automatically then.",
                 'data' => ['project_material' => $result['line'], 'material' => $result['material'], 'outcome' => 'awaiting_registration'],
             ]);
         }
 
-        $result = $this->resolution->resolve($elementMaterial, (int) $validated['material_id'], (int) auth()->id(), $validated['note'] ?? null);
+        if ($refused = $this->refuseCatalogueWrite($validated)) {
+            return $refused;
+        }
+
+        $result = $this->resolution->resolve($elementMaterial, (int) $validated['material_id'], (int) auth()->id(), $validated['note'] ?? null, [
+            'factor' => isset($validated['factor']) ? (string) $validated['factor'] : null,
+            'save_to_material' => (bool) ($validated['save_to_material'] ?? false),
+            'apply_to_matching' => (bool) ($validated['apply_to_matching'] ?? false),
+        ]);
+
+        if ($result['outcome'] === 'awaiting_registration') {
+            return response()->json([
+                'message' => "\"{$result['material']->material_name}\" is still Under Review. This line links to it automatically as soon as it is activated.",
+                'data' => ['project_material' => $result['line'], 'material' => $result['material'], 'outcome' => 'awaiting_registration'],
+            ]);
+        }
 
         $message = "Linked to \"{$result['material']->material_name}\". Nothing was received, issued, ordered or charged.";
+        if ($result['matching'] !== null && $result['matching']['linked'] !== []) {
+            $message .= ' '.count($result['matching']['linked']).' other line(s) with the same description were linked too.';
+        }
+        if ($result['matching'] !== null && $result['matching']['skipped'] !== []) {
+            $message .= ' '.count($result['matching']['skipped']).' were left for their own resolution (usually a unit that needs its own reading).';
+        }
         if ($result['requisitions']['relinked'] !== []) {
             $message .= ' '.count($result['requisitions']['relinked']).' open requisition line(s) now name this material.';
         }
@@ -94,8 +119,61 @@ class ProjectMaterialResolutionController extends Controller
                 'material' => $result['material'],
                 'unit' => $result['unit'],
                 'requisitions' => $result['requisitions'],
+                'matching' => $result['matching'] ? ['linked' => $result['matching']['linked'], 'skipped' => $result['matching']['skipped']] : null,
                 'outcome' => 'resolved',
             ],
+        ]);
+    }
+
+    /** Keeping a reading on the material is a catalogue change. */
+    private function refuseCatalogueWrite(array $validated): ?JsonResponse
+    {
+        if (! ($validated['save_to_material'] ?? false)) {
+            return null;
+        }
+        if (empty($validated['factor'])) {
+            return response()->json(['message' => 'Give the reading to keep on the material.', 'errors' => ['factor' => ['Enter how many stock units one requirement unit holds.']]], 422);
+        }
+
+        return auth()->user()?->can(Permissions::MATERIALS_LIBRARY_MANAGE)
+            ? null
+            : response()->json(['message' => 'Only the Material Library custodian can keep a conversion on the material. Use it for this requirement only.'], 403);
+    }
+
+    /** Previous matches for this description, and other open lines asking for the same thing. */
+    public function context(ElementMaterial $elementMaterial): JsonResponse
+    {
+        if ($denied = $this->denied()) {
+            return $denied;
+        }
+
+        return response()->json(['data' => array_merge($this->resolution->context($elementMaterial), [
+            'can_manage_library' => (bool) auth()->user()?->can(Permissions::MATERIALS_LIBRARY_MANAGE),
+        ])]);
+    }
+
+    /** Give a linked line whose unit the catalogue cannot read its reading. */
+    public function unitReading(Request $request, ElementMaterial $elementMaterial): JsonResponse
+    {
+        if ($denied = $this->denied()) {
+            return $denied;
+        }
+        $validated = $request->validate([
+            'factor' => 'required|numeric|gt:0|max:1000000',
+            'save_to_material' => 'nullable|boolean',
+        ]);
+        if ($refused = $this->refuseCatalogueWrite($validated)) {
+            return $refused;
+        }
+
+        $result = $this->resolution->setUnitReading($elementMaterial, (string) $validated['factor'], (bool) ($validated['save_to_material'] ?? false), (int) auth()->id());
+        $unit = $result['unit'];
+
+        return response()->json([
+            'message' => "Reads as 1 {$elementMaterial->unit_of_measurement} = ".(float) $unit['factor']." {$unit['base_unit']}"
+                .(($validated['save_to_material'] ?? false) ? ', kept on the material for every job.' : ' for this requirement.')
+                .' It can be issued now.',
+            'data' => ['project_material' => $result['line'], 'unit' => $unit],
         ]);
     }
 

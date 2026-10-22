@@ -556,10 +556,12 @@ class ResolveMaterialIntegrityTest extends TestCase
         $this->postJson("/api/materials-library/materials/{$requested->id}/activate")->assertOk();
         $this->assertSame('Active', $requested->fresh()->item_status);
 
-        Sanctum::actingAs($this->user->fresh());
-        $this->resolve($line, ['material_id' => $requested->id])->assertOk();
+        // Activation links the waiting line itself — nobody comes back to do it.
         $this->assertSame($requested->id, $line->fresh()->library_material_id);
         $this->assertSame('resolved', $line->fresh()->effectiveDisposition());
+
+        Sanctum::actingAs($this->user->fresh());
+        $this->resolve($line, ['material_id' => $requested->id])->assertStatus(422);
     }
 
     /* ── Phase 5: non-stock (F-12) ─────────────────────────────────────── */
@@ -655,5 +657,172 @@ class ResolveMaterialIntegrityTest extends TestCase
         $this->assertNotEmpty($data[$sheet->id]['reason']);
         $this->assertSame('compatible', $data[$byArea->id]['status']);
         $this->assertSame('alias', $data[$byArea->id]['basis']);
+    }
+
+    /* ── Faster resolution: unit readings, matching lines, waiting lines ─ */
+
+    public function test_a_reading_declared_for_one_requirement_resolves_an_unreadable_unit(): void
+    {
+        // Timber is stocked by the metre; on this job a "piece" is 2.4 m.
+        $line = $this->line('Timber 2x2', 'pcs', 10);
+        $timber = $this->material('Cypress 2x2', 'm');
+
+        $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4])->assertOk()
+            ->assertJsonPath('data.unit.basis', 'declared');
+
+        $fresh = $line->fresh();
+        $this->assertSame('2.400000', (string) $fresh->requirement_base_factor);
+        $this->assertSame('declared', $fresh->requirement_unit_basis['basis']);
+        $this->assertSame('pcs', $fresh->unit_of_measurement, 'BOM unit untouched');
+        $this->assertSame(0, DB::table('material_uom_conversions')->where('material_id', $timber->id)->count(), 'a per-line reading never reaches the catalogue');
+
+        // 10 pieces x 2.4 m = 24 m.
+        $this->issue($line, $timber, 25)->assertStatus(422);
+        $this->issue($line, $timber, 24)->assertOk();
+    }
+
+    public function test_a_declared_reading_is_ignored_when_the_catalogue_already_reads_the_unit(): void
+    {
+        $line = $this->line('Aluminium profile', 'Mtrs', 5);
+        $profile = $this->material('Aluminium Profile 40x40', 'm');
+
+        $this->resolve($line, ['material_id' => $profile->id, 'factor' => 3])->assertOk()
+            ->assertJsonPath('data.unit.basis', 'alias');
+        $this->assertSame(1.0, (float) $line->fresh()->requirement_base_factor);
+    }
+
+    public function test_changing_the_bom_unit_clears_a_declared_reading(): void
+    {
+        $line = $this->line('Timber 2x2', 'pcs', 10);
+        $timber = $this->material('Cypress 2x2', 'm');
+        $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4])->assertOk();
+
+        $this->save($line->fresh(), ['unitOfMeasurement' => 'kg', 'libraryMaterialId' => $timber->id, 'libraryMaterialIdBaseline' => $timber->id])->assertOk();
+
+        $this->assertNull($line->fresh()->requirement_base_factor);
+        $this->issue($line->fresh(), $timber, 1)->assertStatus(422);
+    }
+
+    public function test_an_unregistered_bom_unit_can_be_read_for_its_line_but_not_kept_on_the_material(): void
+    {
+        $line = $this->line('Gloss paint white', 'gallons', 4);
+        $paint = $this->material('Gloss Paint White', 'l');
+
+        $this->resolve($line, ['material_id' => $paint->id, 'factor' => 3.785, 'save_to_material' => true])->assertStatus(422)
+            ->assertJsonValidationErrors('save_to_material');
+        $this->assertNull($line->fresh()->library_material_id);
+
+        $this->resolve($line, ['material_id' => $paint->id, 'factor' => 3.785])->assertOk();
+        $this->issue($line->fresh(), $paint, 15.14)->assertOk();
+    }
+
+    public function test_a_reading_kept_on_the_material_reads_every_matching_line(): void
+    {
+        $line = $this->line('Drywall screws 3.5x25', 'pack', 3);
+        $other = $this->line('drywall screws 3.5x25 ', 'Packs', 2);
+        $screws = $this->material('Drywall Screw 3.5x25mm', 'kg');
+
+        $response = $this->resolve($line, ['material_id' => $screws->id, 'factor' => 0.5, 'save_to_material' => true, 'apply_to_matching' => true])
+            ->assertOk()->assertJsonPath('data.unit.basis', 'material_conversion');
+
+        $this->assertSame('0.500000', (string) DB::table('material_uom_conversions')->where('material_id', $screws->id)->value('factor'));
+        $this->assertSame([$other->id], $response->json('data.matching.linked'));
+        $this->assertSame($screws->id, $other->fresh()->library_material_id);
+        $this->assertSame('material_conversion', $other->fresh()->requirement_unit_basis['basis']);
+    }
+
+    public function test_matching_lines_never_inherit_a_per_line_reading(): void
+    {
+        $line = $this->line('Timber 2x2', 'pcs', 10);
+        $sameUnit = $this->line('Timber 2x2', 'pcs', 4);
+        $readable = $this->line('TIMBER 2X2', 'Mtrs', 6);
+        $timber = $this->material('Cypress 2x2', 'm');
+
+        $response = $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4, 'apply_to_matching' => true])->assertOk();
+
+        $this->assertSame([$readable->id], $response->json('data.matching.linked'));
+        $this->assertSame($sameUnit->id, $response->json('data.matching.skipped.0.id'));
+        $this->assertNull($sameUnit->fresh()->library_material_id, 'its piece may be a different length');
+        $this->assertSame($timber->id, $readable->fresh()->library_material_id);
+    }
+
+    public function test_matching_skips_closed_jobs_classified_and_excluded_lines(): void
+    {
+        $line = $this->line('Contact adhesive', 'ltrs', 2);
+        $excluded = $this->line('Contact adhesive', 'ltrs', 1, null, false);
+        $nonStock = $this->line('Contact adhesive', 'ltrs', 1);
+        $nonStock->forceFill(['requirement_disposition' => ElementMaterial::DISPOSITION_NON_STOCK])->save();
+        $glue = $this->material('Contact Adhesive', 'l');
+
+        $context = $this->getJson("/api/procurement-stores/project-materials/{$line->id}/resolve-context")->assertOk();
+        $this->assertSame(0, $context->json('data.matching.count'));
+
+        $this->resolve($line, ['material_id' => $glue->id, 'apply_to_matching' => true])->assertOk()
+            ->assertJsonPath('data.matching.linked', []);
+        $this->assertNull($excluded->fresh()->library_material_id);
+        $this->assertNull($nonStock->fresh()->library_material_id);
+    }
+
+    public function test_context_suggests_earlier_matches_and_counts_matching_lines(): void
+    {
+        $glue = $this->material('Contact Adhesive', 'l');
+        $this->line('Contact adhesive', 'ltrs', 1, $glue->id);
+        $this->line('contact adhesive', 'l', 3, $glue->id);
+        $line = $this->line('Contact Adhesive', 'ltrs', 2);
+        $this->line('Contact adhesive', 'ltrs', 5);
+
+        $data = $this->getJson("/api/procurement-stores/project-materials/{$line->id}/resolve-context")->assertOk()->json('data');
+
+        $this->assertSame($glue->id, $data['suggestions'][0]['id']);
+        $this->assertSame(2, $data['suggestions'][0]['times']);
+        $this->assertSame('compatible', $data['suggestions'][0]['compatibility']['status']);
+        $this->assertSame(1, $data['matching']['count']);
+        $this->assertSame(['WNG-78B-001'], $data['matching']['jobs']);
+        $this->assertTrue($data['requirement']['recognised']);
+        $this->assertTrue($data['can_manage_library']);
+    }
+
+    public function test_a_linked_line_with_an_unreadable_unit_can_be_given_its_reading(): void
+    {
+        $sticker = $this->material('Matt white sticker', 'm');
+        $line = $this->line('Matt white sticker', 'sqm', 14, $sticker->id);
+        $this->issue($line, $sticker, 8)->assertStatus(422);
+
+        // Roll is 1.27 m wide: one m2 uses 0.787 m of the roll.
+        $this->postJson("/api/procurement-stores/project-materials/{$line->id}/unit-reading", ['factor' => 0.787402])->assertOk();
+
+        $this->assertSame('declared', $line->fresh()->requirement_unit_basis['basis']);
+        $this->issue($line->fresh(), $sticker, 11)->assertOk();
+        $this->postJson("/api/procurement-stores/project-materials/{$line->id}/unit-reading", ['factor' => 1])->assertStatus(422);
+    }
+
+    public function test_keeping_a_reading_on_the_material_needs_catalogue_rights(): void
+    {
+        $line = $this->line('Timber 2x2', 'pcs', 10);
+        $timber = $this->material('Cypress 2x2', 'm');
+        $storekeeper = User::factory()->create(['is_active' => true]);
+        $storekeeper->givePermissionTo(Permission::findOrCreate(\App\Constants\Permissions::STORES_MANAGE, 'web'));
+        Sanctum::actingAs($storekeeper->fresh());
+
+        $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4, 'save_to_material' => true])->assertStatus(403);
+        $this->assertSame(0, DB::table('material_uom_conversions')->count());
+        $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4])->assertOk();
+    }
+
+    public function test_choosing_an_item_still_under_review_waits_and_links_on_activation(): void
+    {
+        $line = $this->line('Timber 2x2', 'pcs', 10);
+        $timber = $this->material('Cypress 2x2', 'm', 50, 'Under Review');
+
+        $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4])->assertOk()
+            ->assertJsonPath('data.outcome', 'awaiting_registration');
+        $this->assertNull($line->fresh()->library_material_id);
+        $this->assertSame($timber->id, $line->fresh()->requested_material_id);
+
+        $timber->update(['item_status' => 'Active', 'is_active' => true]);
+
+        $fresh = $line->fresh();
+        $this->assertSame($timber->id, $fresh->library_material_id);
+        $this->assertSame('2.400000', (string) $fresh->requirement_base_factor, 'the reading given at resolution is kept');
     }
 }

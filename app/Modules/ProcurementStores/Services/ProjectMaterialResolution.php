@@ -6,6 +6,7 @@ use App\Events\MaterialsListChanged;
 use App\Models\ElementMaterial;
 use App\Models\ProjectEnquiry;
 use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
+use App\Modules\MaterialsLibrary\Models\MaterialUomConversion;
 use App\Modules\MaterialsLibrary\Services\MaterialDuplicateFinder;
 use App\Modules\MaterialsLibrary\Services\MaterialRegistrationService;
 use App\Modules\ProcurementStores\Models\RequisitionItem;
@@ -24,10 +25,17 @@ use Illuminate\Validation\ValidationException;
  * description, quantity or unit. Stock that is on hand without a purchase is
  * taken in through Receive Stock, where the `stores.review` controls live.
  *
- * When no item exists, Stores requests one: an Under Review library item that
- * only the Material Library custodian (`materials_library.manage`) can
- * activate. The line waits as "awaiting registration" and is resolved to the
- * item once it is Active — through this same path, with the same checks.
+ * When no item exists, it is registered through the Material Library's own
+ * form and endpoint (MaterialRegistrationService) and then linked here like
+ * any other item. An item that lands Under Review — or one requested by
+ * someone without catalogue rights — leaves the line "awaiting registration";
+ * activation links it automatically (linkAwaiting()), through this same path,
+ * with the same checks.
+ *
+ * Units: a requirement the catalogue cannot read can be given a reading at
+ * resolution, either for that line only or kept on the material
+ * (RequirementUnits rule 4). Lines with the same description elsewhere can be
+ * linked in the same step; they never inherit a per-line reading.
  *
  * A genuine one-off purchase is classified "non-stock / direct purchase" and
  * never becomes a fictitious inventory item.
@@ -43,13 +51,48 @@ class ProjectMaterialResolution
     ) {}
 
     /**
-     * Link an unlinked requirement to an Active library item.
+     * Link an unlinked requirement to a library item.
      *
-     * @return array{line: ElementMaterial, material: LibraryMaterial, unit: array, requisitions: array}
+     * Options:
+     *  - factor: stock units in one requirement unit, for a requirement the
+     *    catalogue cannot read (RequirementUnits rule 4).
+     *  - save_to_material: keep that reading on the material, so every job
+     *    asking in this unit reads the same way from now on.
+     *  - apply_to_matching: link every other open line with the same
+     *    description too, where the unit reads without a per-line reading.
+     *
+     * An item still Under Review cannot be issued, so the line waits on it and
+     * links itself the moment the item is activated (linkAwaiting()).
+     *
+     * @param  array{factor?: ?string, save_to_material?: bool, apply_to_matching?: bool}  $options
+     * @return array{outcome: string, line: ElementMaterial, material: LibraryMaterial, unit: ?array, requisitions: array, matching: ?array}
      */
-    public function resolve(ElementMaterial $line, int $materialId, int $userId, ?string $note = null): array
+    public function resolve(ElementMaterial $line, int $materialId, int $userId, ?string $note = null, array $options = []): array
     {
-        $result = DB::transaction(function () use ($line, $materialId, $userId, $note) {
+        $result = $this->link($line, $materialId, $userId, $note, $options['factor'] ?? null, (bool) ($options['save_to_material'] ?? false));
+        $taskIds = [$result['task_id']];
+
+        $result['matching'] = null;
+        if (($options['apply_to_matching'] ?? false) && $result['outcome'] === 'resolved') {
+            $result['matching'] = $this->resolveMatching($result['line'], $result['material'], $userId);
+            $taskIds = array_merge($taskIds, $result['matching']['task_ids']);
+        }
+
+        $this->announce($taskIds);
+
+        return $result;
+    }
+
+    /**
+     * One locked write of a line's identity; every path that links a line
+     * comes through here. Announcing the change is left to the caller, so a
+     * batch announces each materials list once.
+     *
+     * @return array{outcome: string, line: ElementMaterial, material: LibraryMaterial, unit: ?array, requisitions: array, task_id: ?int}
+     */
+    private function link(ElementMaterial $line, int $materialId, int $userId, ?string $note, ?string $factor, bool $saveToMaterial): array
+    {
+        return DB::transaction(function () use ($line, $materialId, $userId, $note, $factor, $saveToMaterial) {
             $locked = ElementMaterial::with('element.taskMaterialsData.task')->lockForUpdate()->findOrFail($line->id);
             $this->assertOpenForStores($locked);
 
@@ -61,6 +104,9 @@ class ProjectMaterialResolution
             }
 
             $material = LibraryMaterial::with(['uomConversions', 'baseUom'])->findOrFail($materialId);
+            if (($material->item_status ?? 'Active') === 'Under Review') {
+                return $this->park($locked, $material, $userId, $note, $factor, $saveToMaterial);
+            }
             if (($material->item_status ?? 'Active') !== 'Active') {
                 throw ValidationException::withMessages([
                     'material_id' => "Only Active Material Library items can be linked. '{$material->material_name}' is {$material->item_status}.",
@@ -71,8 +117,13 @@ class ProjectMaterialResolution
             // only be relinked to the material that was actually issued.
             $this->identity->assertCanBecome($locked, (int) $material->id, 'material_id');
 
+            if ($saveToMaterial && $factor !== null) {
+                $this->learnConversion($locked, $material, $factor);
+                $factor = null;
+            }
+
             // Refuses an incompatible unit with the reason, before anything is written.
-            $snapshot = $this->units->snapshot($locked, $material, $userId);
+            $snapshot = $this->units->snapshot($locked, $material, $userId, $factor);
 
             $entry = [
                 'library_material_id' => (int) $material->id,
@@ -109,21 +160,285 @@ class ProjectMaterialResolution
             $requisitions = $this->reconcileRequisitions($locked, $material, $snapshot['requirement_base_factor']);
 
             return [
+                'outcome' => 'resolved',
                 'line' => $locked->fresh(['libraryMaterial']),
                 'material' => $material,
                 'unit' => $this->units->assess($locked->fresh(), $material),
                 'requisitions' => $requisitions,
-                'task_id' => $materialsData?->enquiry_task_id,
+                'task_id' => $materialsData?->enquiry_task_id ? (int) $materialsData->enquiry_task_id : null,
+            ];
+        });
+    }
+
+    /**
+     * Point the line at an item that is still Under Review. Nothing is linked
+     * or issuable; activation links it (linkAwaiting()) with the reading the
+     * resolver gave here.
+     */
+    private function park(ElementMaterial $locked, LibraryMaterial $material, int $userId, ?string $note, ?string $factor, bool $saveToMaterial): array
+    {
+        if ($locked->requirement_disposition === ElementMaterial::DISPOSITION_AWAITING_REGISTRATION
+            && (int) $locked->requested_material_id === (int) $material->id) {
+            throw ValidationException::withMessages([
+                'material_id' => "'{$material->material_name}' is still Under Review. This line links to it automatically once it is activated.",
+            ]);
+        }
+
+        if ($saveToMaterial && $factor !== null) {
+            $this->learnConversion($locked, $material, $factor);
+            $factor = null;
+        }
+        // Prove the reading now, so activation cannot fail on the unit later.
+        $this->units->snapshot($locked, $material, $userId, $factor);
+
+        $metadata = $locked->source_metadata ?? [];
+        $metadata['material_request'] = [
+            'requested_material_id' => (int) $material->id,
+            'requested_by' => $userId,
+            'requested_at' => now()->toIso8601String(),
+            'reason' => $note ?: 'Linked to a material that is still Under Review.',
+            'factor' => $factor,
+            'original' => ['description' => $locked->description, 'quantity' => (string) $locked->getRawOriginal('quantity'), 'unit' => $locked->unit_of_measurement],
+            'project' => $this->projectReference($locked),
+        ];
+        $locked->forceFill([
+            'requirement_disposition' => ElementMaterial::DISPOSITION_AWAITING_REGISTRATION,
+            'requested_material_id' => $material->id,
+            'source_metadata' => $metadata,
+        ])->save();
+
+        return [
+            'outcome' => 'awaiting_registration',
+            'line' => $locked->fresh(['requestedMaterial']),
+            'material' => $material,
+            'unit' => null,
+            'requisitions' => ['relinked' => [], 'needs_review' => []],
+            'task_id' => null,
+        ];
+    }
+
+    /**
+     * Keep a requirement's reading on the material itself (material_uom_conversions),
+     * so every requirement in that unit reads the same way. Only for a reading
+     * that truly belongs to the material — a sheet's area, a packet's weight.
+     */
+    private function learnConversion(ElementMaterial $line, LibraryMaterial $material, string $factor): void
+    {
+        $required = $this->units->normalise($line->unit_of_measurement);
+        $base = $this->units->baseUnitOf($material);
+        if (! $base) {
+            throw ValidationException::withMessages(['factor' => "'{$material->material_name}' has no stock unit in the Material Catalogue. Set its base unit first."]);
+        }
+        if (! $required) {
+            throw ValidationException::withMessages(['save_to_material' => "'{$line->unit_of_measurement}' is not a registered unit, so it cannot be kept on the material. Use the reading for this requirement only, or register the unit first."]);
+        }
+        if ((float) $factor <= 0) {
+            throw ValidationException::withMessages(['factor' => 'Enter how many stock units one requirement unit holds — a number above zero.']);
+        }
+        if ((int) $required->id === (int) $base->id) {
+            return;
+        }
+
+        MaterialUomConversion::query()->firstOrCreate(
+            ['material_id' => $material->id, 'from_uom_id' => $required->id, 'to_uom_id' => $base->id],
+            ['factor' => $factor],
+        );
+        $material->load('uomConversions');
+    }
+
+    /**
+     * Give an already-linked line the reading of its unit that it lacks. This
+     * is the only way out for a line whose BOM unit the catalogue cannot read:
+     * it stays unissuable until it has one.
+     *
+     * @return array{line: ElementMaterial, unit: array}
+     */
+    public function setUnitReading(ElementMaterial $line, string $factor, bool $saveToMaterial, int $userId): array
+    {
+        $result = DB::transaction(function () use ($line, $factor, $saveToMaterial, $userId) {
+            $locked = ElementMaterial::with('element.taskMaterialsData.task')->lockForUpdate()->findOrFail($line->id);
+            $this->assertOpenForStores($locked);
+            if (! $locked->library_material_id) {
+                throw ValidationException::withMessages(['factor' => 'Resolve this line to a Material Library item first.']);
+            }
+
+            $material = LibraryMaterial::with(['uomConversions', 'baseUom'])->findOrFail($locked->library_material_id);
+            $current = $this->units->assess($locked, $material);
+            if ($current['status'] === 'compatible') {
+                throw ValidationException::withMessages(['factor' => "This requirement already reads in {$current['base_unit']} (1 {$locked->unit_of_measurement} = ".(float) $current['factor']." {$current['base_unit']})."]);
+            }
+
+            $declared = $factor;
+            if ($saveToMaterial) {
+                $this->learnConversion($locked, $material, $factor);
+                $declared = null;
+            }
+            $snapshot = $this->units->snapshot($locked, $material, $userId, $declared);
+
+            $metadata = $locked->source_metadata ?? [];
+            $metadata['unit_readings'] = array_merge($metadata['unit_readings'] ?? [], [$snapshot['requirement_unit_basis']]);
+            $locked->forceFill(array_merge($snapshot, ['source_metadata' => $metadata]))->save();
+
+            $materialsData = $locked->element?->taskMaterialsData;
+            $materialsData?->touch();
+
+            return [
+                'line' => $locked->fresh(['libraryMaterial']),
+                'unit' => $this->units->assess($locked->fresh(), $material),
+                'task_id' => $materialsData?->enquiry_task_id ? (int) $materialsData->enquiry_task_id : null,
             ];
         });
 
-        // Budget, procurement task and planned cost lines carry the line's
-        // library identity; the existing listener chain refreshes them.
-        if ($result['task_id']) {
-            MaterialsListChanged::dispatch((int) $result['task_id']);
-        }
+        $this->announce([$result['task_id']]);
 
         return $result;
+    }
+
+    /**
+     * Link the other open lines asking for the same thing. Each is linked on
+     * its own lock through link(), so one refusal does not undo the rest, and
+     * a per-line reading is never copied: a line whose unit the catalogue
+     * cannot read is reported, not guessed.
+     *
+     * @return array{linked: array<int, int>, skipped: array<int, array>, task_ids: array<int, int>}
+     */
+    private function resolveMatching(ElementMaterial $source, LibraryMaterial $material, int $userId): array
+    {
+        $linked = [];
+        $skipped = [];
+        $taskIds = [];
+        foreach ($this->matchingLines($source)->get() as $sibling) {
+            try {
+                $result = $this->link($sibling, (int) $material->id, $userId, "Linked together with line #{$source->id}.", null, false);
+                $linked[] = (int) $sibling->id;
+                $taskIds[] = $result['task_id'];
+            } catch (ValidationException $exception) {
+                $skipped[] = [
+                    'id' => (int) $sibling->id,
+                    'unit' => $sibling->unit_of_measurement,
+                    'reason' => collect($exception->errors())->flatten()->first(),
+                ];
+            }
+        }
+
+        return ['linked' => $linked, 'skipped' => $skipped, 'task_ids' => array_values(array_filter($taskIds))];
+    }
+
+    /**
+     * Open lines elsewhere with the same description: unlinked, unclassified,
+     * included, on a signed-off list of a job that may still be resolved.
+     */
+    public function matchingLines(ElementMaterial $source, int $limit = 200): \Illuminate\Database\Eloquent\Builder
+    {
+        $key = mb_strtolower(trim((string) $source->description));
+        $eligible = app(ProjectMaterialWorkflowEligibility::class)
+            ->eligibleEnquiryIds(ProjectMaterialWorkflowEligibility::CAP_RESOLUTION)->all();
+
+        return ElementMaterial::query()
+            ->whereKeyNot($source->id)
+            ->whereNull('library_material_id')
+            ->whereNull('requirement_disposition')
+            ->where('is_included', true)
+            ->whereRaw('LOWER(TRIM(description)) = ?', [$key])
+            ->whereHas('element', fn ($element) => $element->withoutTrashed()
+                ->whereHas('taskMaterialsData', fn ($data) => $data
+                    ->where('project_info->approval_status->all_approved', true)
+                    ->whereHas('task', fn ($task) => $task->whereIn('project_enquiry_id', $eligible ?: [0]))))
+            ->orderBy('id')
+            ->limit($limit);
+    }
+
+    /**
+     * What the resolver should see first: items this description was linked
+     * to before, and how many other open lines ask for the same thing.
+     */
+    public function context(ElementMaterial $line): array
+    {
+        $key = mb_strtolower(trim((string) $line->description));
+        $history = ElementMaterial::query()
+            ->whereNotNull('library_material_id')
+            ->whereRaw('LOWER(TRIM(description)) = ?', [$key])
+            ->selectRaw('library_material_id, COUNT(*) AS times')
+            ->groupBy('library_material_id')
+            ->orderByDesc('times')
+            ->limit(5)
+            ->pluck('times', 'library_material_id');
+
+        $compatibility = $history->isEmpty() ? [] : $this->compatibility($line, $history->keys()->all());
+        $suggestions = LibraryMaterial::query()->whereIn('id', $history->keys())->get()
+            ->map(fn (LibraryMaterial $material) => [
+                'id' => (int) $material->id,
+                'material_name' => $material->material_name,
+                'material_code' => $material->material_code,
+                'item_status' => $material->item_status,
+                'times' => (int) $history[$material->id],
+                'compatibility' => $compatibility[$material->id] ?? null,
+            ])
+            ->sortByDesc('times')->values()->all();
+
+        $matching = $this->matchingLines($line)->with('element.taskMaterialsData.task')->get();
+        $enquiryIds = $matching->map(fn (ElementMaterial $row) => $row->element?->taskMaterialsData?->task?->project_enquiry_id)->filter()->unique();
+        $required = $this->units->normalise($line->unit_of_measurement);
+
+        return [
+            'requirement' => [
+                'unit_text' => $line->unit_of_measurement,
+                'unit' => $required?->code,
+                'unit_id' => $required?->id,
+                'recognised' => (bool) $required,
+            ],
+            'suggestions' => $suggestions,
+            'matching' => [
+                'count' => $matching->count(),
+                'same_unit' => $matching->filter(fn (ElementMaterial $row) => $required
+                    ? $this->units->normalise($row->unit_of_measurement)?->id === $required->id
+                    : mb_strtolower(trim((string) $row->unit_of_measurement)) === mb_strtolower(trim((string) $line->unit_of_measurement)))->count(),
+                'jobs' => ProjectEnquiry::query()->whereIn('id', $enquiryIds)->limit(8)->pluck('job_number')->filter()->values()->all(),
+                'job_count' => $enquiryIds->count(),
+            ],
+        ];
+    }
+
+    /**
+     * Link every line that was waiting on this item, now that it is Active,
+     * with the reading each resolver gave when they chose it.
+     *
+     * @return array{linked: array<int, int>, skipped: array<int, array>}
+     */
+    public function linkAwaiting(LibraryMaterial $material, int $userId): array
+    {
+        $linked = [];
+        $skipped = [];
+        $taskIds = [];
+        $waiting = ElementMaterial::query()
+            ->where('requested_material_id', $material->id)
+            ->where('requirement_disposition', ElementMaterial::DISPOSITION_AWAITING_REGISTRATION)
+            ->whereNull('library_material_id')
+            ->get();
+
+        foreach ($waiting as $line) {
+            $factor = data_get($line->source_metadata, 'material_request.factor');
+            try {
+                $result = $this->link($line, (int) $material->id, $userId, 'Linked automatically when the requested material was activated.', $factor !== null ? (string) $factor : null, false);
+                $linked[] = (int) $line->id;
+                $taskIds[] = $result['task_id'];
+            } catch (ValidationException $exception) {
+                // Left waiting; the desk still offers Resolve with the reason.
+                $skipped[] = ['id' => (int) $line->id, 'reason' => collect($exception->errors())->flatten()->first()];
+            }
+        }
+
+        $this->announce($taskIds);
+
+        return ['linked' => $linked, 'skipped' => $skipped];
+    }
+
+    /** Budget, procurement and planned cost carry line identity; refresh each list once. */
+    private function announce(array $taskIds): void
+    {
+        foreach (array_unique(array_filter($taskIds)) as $taskId) {
+            MaterialsListChanged::dispatch((int) $taskId);
+        }
     }
 
     /**

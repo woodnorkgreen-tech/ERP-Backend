@@ -91,6 +91,8 @@ Route::post('/project-materials/{elementMaterial}/resolve-catalogue', [ProjectMa
 Route::get('/project-materials/{elementMaterial}/compatibility', [ProjectMaterialResolutionController::class, 'compatibility']);
 Route::get('/project-materials/{elementMaterial}/registration-candidates', [ProjectMaterialResolutionController::class, 'registrationCandidates']);
 Route::post('/project-materials/{elementMaterial}/disposition', [ProjectMaterialResolutionController::class, 'classify']);
+Route::get('/project-materials/{elementMaterial}/resolve-context', [ProjectMaterialResolutionController::class, 'context']);
+Route::post('/project-materials/{elementMaterial}/unit-reading', [ProjectMaterialResolutionController::class, 'unitReading']);
 Route::get('/stock-counts', [StockCountController::class, 'index']);
 Route::post('/stock-counts', [StockCountController::class, 'store']);
 Route::get('/stock-counts/{stockCount}', [StockCountController::class, 'show']);

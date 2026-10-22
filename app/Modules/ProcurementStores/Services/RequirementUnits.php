@@ -24,7 +24,12 @@ use Illuminate\Validation\ValidationException;
  *     is material-specific. It is only accepted when the material carries an
  *     approved conversion from the BOM unit to its stock unit in the Material
  *     Catalogue (material_uom_conversions, maintained by the library custodian).
- *  4. Otherwise the requirement is incompatible: it cannot be resolved to that
+ *  4. Some readings belong to one requirement, not to the material: a "piece"
+ *     of timber is 2.4 m on one job and 3 m on the next. Stores may declare
+ *     the reading for that line alone when resolving it (basis "declared").
+ *     It is captured on the line like any other reading and is cleared by the
+ *     materials-list save the moment the BOM unit or the material changes.
+ *  5. Otherwise the requirement is incompatible: it cannot be resolved to that
  *     material, and nothing can be issued against it.
  *
  * The BOM quantity and unit are never rewritten. The approved factor and its
@@ -103,7 +108,7 @@ class RequirementUnits
         $result = [
             'status' => 'unlinked', 'factor' => null, 'basis' => null,
             'requirement_unit' => $required?->code, 'requirement_unit_text' => $text,
-            'base_unit' => null, 'conversion_id' => null, 'stored' => false, 'reason' => null,
+            'base_unit' => null, 'conversion_id' => null, 'stored' => false, 'reason' => null, 'declarable' => false,
         ];
 
         if (! $material) {
@@ -125,6 +130,11 @@ class RequirementUnits
                 'basis' => $stored['basis'] ?? 'stored', 'conversion_id' => $stored['conversion_id'] ?? null, 'stored' => true,
             ]);
         }
+
+        // Every remaining refusal can be answered by stating how many stock
+        // units one requirement unit holds (rule 4), provided the material
+        // has a stock unit at all.
+        $result['declarable'] = (bool) $base;
 
         if (! $required) {
             return array_merge($result, ['status' => 'incompatible',
@@ -158,8 +168,8 @@ class RequirementUnits
             : "The requirement is in {$required->name} ({$required->dimension}) but '{$material->material_name}' is stocked in {$base->name} ({$base->dimension}).";
 
         return array_merge($result, ['status' => 'incompatible',
-            'reason' => $reason.' Add an approved conversion from '.$required->code.' to '.$base->code
-                .' on the material in the Material Catalogue (for example the sheet size or roll length), or choose a material stocked in '.$required->name.'.']);
+            'reason' => $reason.' Give its reading (how much '.$base->code.' one '.$required->code
+                .' is) when resolving or with "Set unit reading", or choose a material stocked in '.$required->name.'.']);
     }
 
     /** Requirement in stock units, or null when it cannot be read. */
@@ -189,11 +199,22 @@ class RequirementUnits
      *
      * @return array<string, mixed>
      */
-    public function snapshot(ElementMaterial $line, LibraryMaterial $material, int $userId): array
+    public function snapshot(ElementMaterial $line, LibraryMaterial $material, int $userId, ?string $declaredFactor = null): array
     {
         $assessment = $this->assess($line->replicate()->forceFill([
             'requirement_base_factor' => null, 'requirement_unit_basis' => null,
         ]), $material);
+
+        // A reading the catalogue already gives always wins; a declared one is
+        // only for a requirement the catalogue cannot read (rule 4).
+        if ($assessment['status'] !== 'compatible' && $declaredFactor !== null && ($assessment['declarable'] ?? false)) {
+            if (bccomp($this->decimal($declaredFactor), '0', 6) <= 0) {
+                throw ValidationException::withMessages(['factor' => 'Enter how many stock units one requirement unit holds — a number above zero.']);
+            }
+            $assessment = array_merge($assessment, [
+                'status' => 'compatible', 'factor' => $this->decimal($declaredFactor), 'basis' => 'declared', 'reason' => null,
+            ]);
+        }
 
         if ($assessment['status'] !== 'compatible') {
             throw ValidationException::withMessages(['material_id' => $assessment['reason']]);

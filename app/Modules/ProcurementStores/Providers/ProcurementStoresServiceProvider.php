@@ -30,6 +30,24 @@ class ProcurementStoresServiceProvider extends ServiceProvider
         Requisition::observe(RequisitionObserver::class);
         PurchaseOrder::observe(PurchaseOrderObserver::class);
 
+        // A project line waiting on a requested material links itself the
+        // moment that material becomes Active — whichever door activated it
+        // (activate, an edit that completes it, bulk controls).
+        \App\Modules\MaterialsLibrary\Models\LibraryMaterial::updated(function ($material) {
+            if (! $material->wasChanged('item_status') || $material->item_status !== 'Active') {
+                return;
+            }
+            \Illuminate\Support\Facades\DB::afterCommit(function () use ($material) {
+                try {
+                    app(\App\Modules\ProcurementStores\Services\ProjectMaterialResolution::class)
+                        ->linkAwaiting($material, (int) (auth()->id() ?? $material->updated_by ?? 0));
+                } catch (\Throwable $exception) {
+                    // Activation never fails on this; the desk still offers Resolve.
+                    report($exception);
+                }
+            });
+        });
+
         // Load migrations
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
