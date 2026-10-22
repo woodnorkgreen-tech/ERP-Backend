@@ -157,6 +157,12 @@ class SalaryAdvanceRegisterTest extends TestCase
         // Every data cell wraps, and the row is tall enough for its wrapped text.
         $this->assertTrue($pay->getStyle($columns['Narration'].($header + 1))->getAlignment()->getWrapText());
         $this->assertGreaterThan(15, $pay->getRowDimension($header + 1)->getRowHeight());
+        // Phone and account numbers stay exact text.
+        $this->assertSame('s', $pay->getCell($columns['Phone'].($header + 1))->getDataType());
+        $this->assertSame('0712345678', $pay->getCell($columns['Phone'].($header + 1))->getValue());
+        foreach (['ID No.', 'Department', 'Approved on'] as $dropped) {
+            $this->assertArrayNotHasKey($dropped, $columns);
+        }
         foreach (['Paid on', 'Payment ref.', 'Paid by'] as $financeColumn) {
             $this->assertArrayHasKey($financeColumn, $columns);
             $this->assertSame('FFF7D6', $pay->getStyle($columns[$financeColumn].($header + 1))->getFill()->getStartColor()->getRGB());
@@ -174,8 +180,9 @@ class SalaryAdvanceRegisterTest extends TestCase
         $this->assertSame(4, $register->getHighestDataRow() - $header - 1, 'four rows plus a totals row');
         $recovered = collect(range($header + 1, $header + 4))->map(fn ($row) => $register->getCell($columns['Recovered'].$row)->getValue());
         $this->assertContains(0.0, $recovered->all(), 'a zero is written as 0.00, not left blank');
-        $idCell = $register->getCell($columns['ID No.'].($header + 1));
-        $this->assertSame('s', $idCell->getDataType());
+        foreach (['ID No.', 'KRA PIN', 'Monthly salary', 'HR remarks'] as $dropped) {
+            $this->assertArrayNotHasKey($dropped, $columns, "{$dropped} is not part of the register");
+        }
         $this->assertSame('#,##0.00', $register->getStyle($columns['Advance (KES)'].($header + 1))->getNumberFormat()->getFormatCode());
         $plans = collect(range($header + 1, $header + 4))->map(fn ($row) => $register->getCell($columns['Repayment plan'].$row)->getValue());
         $this->assertContains('KES 4,000.00/month × 2', $plans->all());
