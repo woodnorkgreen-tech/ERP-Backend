@@ -5,6 +5,7 @@ namespace App\Modules\Logistics\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Logistics\Models\Delivery;
 use App\Modules\Logistics\Models\DeliveryStop;
+use App\Modules\Logistics\Models\TripRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -32,6 +33,18 @@ class LogisticsAnalyticsController extends Controller
             'avg_km'             => $avgKm ? round($avgKm, 1) : null,
             'avg_duration_mins'  => $avgDurationMins ? (int) round($avgDurationMins) : null,
             'on_time_rate'       => $onTimeRate,
+        ];
+
+        // Trip requests raised in the period, split by kind (not cancelled/rejected).
+        $kinds = TripRequest::where('created_at', '>=', $since)
+            ->whereNotIn('status', ['cancelled', 'rejected'])
+            ->selectRaw('trip_kind, COUNT(*) as total')
+            ->groupBy('trip_kind')
+            ->pluck('total', 'trip_kind');
+        $summary['trip_kinds'] = [
+            'delivery'   => (int) ($kinds['delivery'] ?? 0),
+            'collection' => (int) ($kinds['collection'] ?? 0),
+            'personnel'  => (int) ($kinds['personnel'] ?? 0),
         ];
 
         // ── Top routes ────────────────────────────────────────────────────────

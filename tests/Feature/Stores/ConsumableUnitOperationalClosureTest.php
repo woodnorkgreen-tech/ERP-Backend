@@ -12,12 +12,17 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 class ConsumableUnitOperationalClosureTest extends TestCase {
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
     private User $maker;
     private User $reviewer;
     private LibraryMaterial $material;
     private ConsumableUnitService $service;
     protected function setUp(): void {
         parent::setUp();
+        // Report 76A-3: a stock movement and its ledger entry land together, so
+        // every test here needs a chart and the approved stock accounts.
+        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
+        $this->activateStoresPostingAccounts();
         $this->maker=User::factory()->create(['is_active'=>true]); $this->reviewer=User::factory()->create(['is_active'=>true]);
         foreach ([Permissions::STORES_VIEW,Permissions::STORES_MANAGE,Permissions::STORES_REVIEW,Permissions::STORES_ADJUST_QUANTITY,Permissions::MATERIALS_LIBRARY_MANAGE,Permissions::MATERIALS_LIBRARY_VIEW] as $p) {
             $permission=Permission::findOrCreate($p); $this->maker->givePermissionTo($permission); $this->reviewer->givePermissionTo($permission);
@@ -30,7 +35,8 @@ class ConsumableUnitOperationalClosureTest extends TestCase {
         $this->service=app(ConsumableUnitService::class);
     }
     private function receive(?string $cost='200'): ConsumableUnit {
-        app(StockMovementPoster::class)->post('receive',['material_id'=>$this->material->id,'quantity'=>'50','receipt_unit_cost'=>$cost,'controlled_units'=>[['quantity'=>'50']],'reference_no'=>'GRN-70B']);
+        // Fixture stock, written through the ledger: see ConsumableUnitTest::receive().
+        app(\App\Modules\ProcurementStores\Services\InventoryService::class)->adjustStock($this->material->id,'50','check_in',['receipt_unit_cost'=>$cost,'controlled_units'=>[['quantity'=>'50']],'reference_no'=>'GRN-70B']);
         return ConsumableUnit::where('material_id',$this->material->id)->firstOrFail();
     }
     private function recordCount(ConsumableUnit $unit,string $quantity='49.3') {
@@ -54,7 +60,7 @@ class ConsumableUnitOperationalClosureTest extends TestCase {
         $this->putJson('/api/materials-library/materials/'.$bulk->id,['tracking_mode'=>'consumable_unit','issue_disposition'=>'consumed'])->assertUnprocessable();
     }
     public function test_receipt_result_contains_unique_composed_references(): void {
-        $r=$this->postJson('/api/procurement-stores/movements',['type'=>'receive','lines'=>[['material_id'=>$this->material->id,'quantity'=>'99.5','receipt_unit_cost'=>'200','controlled_units'=>[['quantity'=>'50'],['quantity'=>'49.5']]]]])->assertOk();
+        $r=$this->postJson('/api/procurement-stores/movements',['type'=>'receive','lines'=>[['material_id'=>$this->material->id,'quantity'=>'99.5','receipt_unit_cost'=>'200','controlled_units'=>[['quantity'=>'50'],['quantity'=>'49.5']],'receipt_reason'=>'opening_balance','notes'=>'Opening rolls counted on the rack']]])->assertOk();
         $units=$r->json('controlled_units'); $this->assertCount(2,$units); $this->assertNotSame($units[0]['unit_code'],$units[1]['unit_code']);
         $this->assertSame('FAB-70B / '.$units[0]['unit_code'],$units[0]['operational_reference']);
     }
@@ -75,7 +81,6 @@ class ConsumableUnitOperationalClosureTest extends TestCase {
         $this->expectException(\DomainException::class);ConsumableUnitCountReview::first()->update(['reason'=>'Rewrite']);
     }
     public function test_positive_variance_uses_unit_cost_and_existing_adjustment_accounts(): void {
-        $this->seed(\App\Modules\Finance\Database\Seeders\FinanceReferenceSeeder::class);
         $u=$this->receive();app(InventoryService::class)->adjustStock($this->material->id,'-10','check_out',['consumable_unit_id'=>$u->id]);
         $c=$this->recordCount($u->fresh(),'40.5');Sanctum::actingAs($this->reviewer);
         $r=$this->postJson($this->reviewUrl($u,$c),['decision'=>'APPROVED','reason'=>'Verified measured surplus'])->assertCreated()->assertJsonPath('data.accounting_status','POSTED');

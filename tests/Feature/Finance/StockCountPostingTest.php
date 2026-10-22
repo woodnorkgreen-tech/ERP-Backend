@@ -34,6 +34,7 @@ use Tests\TestCase;
 class StockCountPostingTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\ApprovesGovernedPostingAccounts;
 
     private User $storekeeper;
 
@@ -42,6 +43,8 @@ class StockCountPostingTest extends TestCase
         parent::setUp();
         $this->travelTo(now()->setDate(2026, 9, 8)->startOfDay());
         $this->seed(FinanceReferenceSeeder::class);
+        // Report 76A-3: stock postings need an approved account; this suite is not about that approval.
+        $this->activateStoresPostingAccounts();
 
         Permission::findOrCreate(Permissions::FINANCE_REPORTS_VIEW, 'web');
         $this->storekeeper = User::factory()->create(['is_active' => true]);

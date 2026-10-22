@@ -36,6 +36,20 @@ class PrintingDashboardService
                 'completed_this_month' => (clone $jobs)->where('status', 'completed')->whereBetween('completed_at', [now()->startOfMonth(), now()->endOfMonth()])->count(),
                 'reprints' => (clone $jobs)->where('order_type', 'reprint')->count(),
                 'low_rolls' => PrintRoll::where('status', 'active')->where('remaining_length_m', '<=', 5)->count(),
+                'outsourced_jobs' => (clone $jobs)->whereNotNull('outsourced_partner_name')->count(),
+            ],
+            'outsourcing' => [
+                'by_reason' => $this->filteredJobs($request)->whereNotNull('outsourced_partner_name')
+                    ->selectRaw('outsourced_reason as reason, COUNT(*) as count')
+                    ->groupBy('reason')
+                    ->orderByDesc('count')
+                    ->get(),
+                'by_partner' => $this->filteredJobs($request)->whereNotNull('outsourced_partner_name')
+                    ->selectRaw('outsourced_partner_name as partner, COUNT(*) as count')
+                    ->groupBy('partner')
+                    ->orderByDesc('count')
+                    ->limit(12)
+                    ->get(),
             ],
             'material_usage' => [
                 'calculated_sqm' => (float) (clone $this->filteredConsumptions($request))->sum('calculated_sqm'),
@@ -226,6 +240,7 @@ class PrintingDashboardService
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('order_type'), fn ($q) => $q->where('order_type', $request->string('order_type')))
             ->when($request->boolean('reprints_only'), fn ($q) => $q->where('order_type', 'reprint'))
+            ->when($request->boolean('outsourced_only'), fn ($q) => $q->whereNotNull('outsourced_partner_name'))
             ->when($request->filled('operator_id'), fn ($q) => $q->where('operator_id', $request->integer('operator_id')))
             ->when($request->filled('machine_asset_id'), fn ($q) => $q->where('machine_asset_id', $request->integer('machine_asset_id')))
             ->when($request->filled('project_enquiry_id'), fn ($q) => $q->where('project_enquiry_id', $request->integer('project_enquiry_id')))

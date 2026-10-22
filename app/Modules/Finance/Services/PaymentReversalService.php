@@ -3,6 +3,10 @@
 namespace App\Modules\Finance\Services;
 
 use App\Models\GovernanceAuditLog;
+use App\Models\User;
+use App\Modules\Finance\CostCollector\Exceptions\CostValidationException;
+use App\Modules\Finance\CostCollector\Models\CostLine;
+use App\Modules\Finance\CostCollector\Services\CostVerificationService;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\PettyCash\Models\PettyCashActivityLog;
@@ -15,7 +19,21 @@ use App\Modules\ProcurementStores\Models\BillPayment;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-/** Reverses one cash event and every accounting document it produced. */
+/**
+ * Reverses one cash event and every accounting document it produced.
+ *
+ * The ONE payment reversal. Every entry point — the Finance "Reverse payment"
+ * action, a petty-cash void, a cost reversal that reaches a payment — comes
+ * here, so the same payment is undone the same way wherever the user stood.
+ *
+ * Report 76 P0-2: this used to stop at the journals sourced to the payment.
+ * A payment that is itself a project cost (a direct petty-cash payment with a
+ * job number, or the settlement of a company-paid cost) carries that cost on a
+ * cost line with a journal of its own, and only the petty-cash void path
+ * remembered to reverse it — through a queued listener. Reversed from Finance,
+ * the payment was voided and the float restored while the job kept the cost
+ * and the ledger kept the cash credit.
+ */
 class PaymentReversalService
 {
     public function __construct(private readonly JournalPostingService $journals) {}
@@ -83,6 +101,12 @@ class PaymentReversalService
 
             $entries = JournalEntry::query()
                 ->where('status', 'posted')
+                // A reversing entry carries its original's source and is itself
+                // `posted`. If part of this payment was already backed out — a
+                // fee reversed ahead of the rest — picking that entry up here
+                // would ask the ledger to reverse a reversal, and the refusal
+                // would block the whole payment reversal.
+                ->whereNull('reversal_of_id')
                 ->where(function ($query) use ($payment, $billPaymentIds): void {
                     $query->where(function ($paymentEntry) use ($payment): void {
                         $paymentEntry->where('source_type', Payment::class)
@@ -106,6 +130,8 @@ class PaymentReversalService
             foreach ($entries as $entry) {
                 $this->journals->reverseEntry($entry, $actorId, "Payment {$payment->payment_no} reversed: {$reason}");
             }
+
+            $this->reverseDirectCost($payment, $actorId, $reason);
 
             $payment->void($actorId, $reason);
             if ($parent && $payment->requisition_child_reference) {
@@ -203,6 +229,79 @@ class PaymentReversalService
                 'receipt_confirmations_invalidated' => $confirmations->pluck('id')->all(),
             ],
         ]);
+    }
+
+    /**
+     * The cost lines this payment IS the economic event for.
+     *
+     * Read from the two source links and nothing else — never from a
+     * description or a job number:
+     *
+     *  - a cost line whose source document is this payment: a direct
+     *    petty-cash payment charged to a job (PettyCashCostProducer::postFor);
+     *  - the cost line this payment names as its own source document: a
+     *    company-paid cost settled at verification
+     *    (CostVerificationService::settleCompanyPaid).
+     *
+     * A supplier settlement, a requisition advance, a voucher payment and a
+     * payroll payment have neither link, so nothing is invented for them: the
+     * goods, the surrender, the voucher's liabilities and the payroll run own
+     * their costs.
+     *
+     * @return \Illuminate\Support\Collection<int, CostLine>
+     */
+    public static function directCostLines(Payment $payment): \Illuminate\Support\Collection
+    {
+        return CostLine::query()
+            ->where(function ($query) use ($payment): void {
+                $query->where(function ($sourced) use ($payment): void {
+                    $sourced->where('source_type', Payment::class)->where('source_id', $payment->id);
+                });
+                if ($payment->source_document_type === CostLine::class && $payment->source_document_id) {
+                    $query->orWhere('id', $payment->source_document_id);
+                }
+            })
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * Back the payment's own project cost out with it, in the same transaction.
+     *
+     * Not best-effort: if the cost cannot be reversed — a closed period, a
+     * journal that will not reverse — the whole reversal is refused, because a
+     * voided payment with its cost still standing is the defect this exists to
+     * close. Already-reversed lines are skipped, so a replay changes nothing.
+     */
+    private function reverseDirectCost(Payment $payment, int $actorId, string $reason): void
+    {
+        $lines = self::directCostLines($payment)
+            ->filter(fn (CostLine $line) => $line->status === CostLine::STATUS_VERIFIED);
+
+        if ($lines->isEmpty()) {
+            return;
+        }
+
+        $actor = User::find($actorId);
+        if (! $actor) {
+            throw new InvalidArgumentException(
+                "Payment {$payment->payment_no} carries a project cost, and reversing a cost needs an identified user."
+            );
+        }
+
+        foreach ($lines as $line) {
+            try {
+                app(CostVerificationService::class)->reverse(
+                    $line, $actor, "Payment {$payment->payment_no} reversed: {$reason}", viaPayment: true,
+                );
+            } catch (CostValidationException $exception) {
+                throw new InvalidArgumentException(
+                    "Payment {$payment->payment_no} was not reversed: its project cost {$line->ref} could not be reversed. "
+                    .$exception->getMessage(),
+                    previous: $exception,
+                );
+            }
+        }
     }
 
     private function cashbookReference(Payment $payment): string

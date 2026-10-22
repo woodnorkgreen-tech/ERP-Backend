@@ -100,7 +100,7 @@ class EnquiryController extends Controller
      * full project graph here previously serialized every task, assignee and
      * deliverable for as many as 500 rows.
      */
-    private const RECEIVABLES_RELATIONS = ['client', 'projectOfficer', 'payments', 'quoteApprovals', 'enquiryTasks.quoteData'];
+    private const RECEIVABLES_RELATIONS = ['client', 'projectOfficer', 'payments', 'quoteApprovals', 'approvedQuoteData'];
 
     protected $notificationService;
     protected $financeService;
@@ -231,9 +231,12 @@ class EnquiryController extends Controller
                 'enquiryTasks.assignedUsers',
                 'enquiryTasks.assignedTo',
                 'enquiryTasks.quoteData',
+                'approvedQuoteData',
                 'deliverables',
                 'payments',
                 'quoteApprovals',
+                // Report 78C: so the list can show and toggle a hold.
+                'openHold',
             ]);
 
         // 2. Apply "Sub-Tab" filtering (Status Groups) - Kept for flexibility for now
@@ -377,7 +380,7 @@ class EnquiryController extends Controller
         // narrowed select would silently read them as null — deciding membership
         // from figures that are not there.
         (clone $filtered)
-            ->with(['payments', 'quoteApprovals', 'enquiryTasks.quoteData'])
+            ->with(['payments', 'quoteApprovals', 'approvedQuoteData'])
             ->chunkById(200, function ($enquiries) use (&$ids, $tab) {
                 foreach ($enquiries as $enquiry) {
                     if (ReceivablesTabs::matches($tab, $enquiry, $this->financeService->getPaymentProgress($enquiry))) {
@@ -434,6 +437,15 @@ class EnquiryController extends Controller
         ]);
 
         $validatedData = $request->validated();
+
+        // The form says which pipeline it was opened on, but sends no preset. A
+        // job created from "New Internal Job" was therefore saved with no preset,
+        // which every filter reads as External.
+        $internal = (bool) ($validatedData['is_non_profit'] ?? false);
+        unset($validatedData['is_non_profit']);
+        if ($internal && ! in_array($validatedData['workflow_preset_type'] ?? null, ProjectEnquiry::INTERNAL_PRESETS, true)) {
+            $validatedData['workflow_preset_type'] = ProjectEnquiry::DEFAULT_INTERNAL_PRESET;
+        }
 
         try {
             DB::beginTransaction();
@@ -997,6 +1009,76 @@ class EnquiryController extends Controller
      *     @OA\Response(response=401, description="Unauthorized")
      * )
      */
+    /**
+     * Move a job between the External (client) and Internal pipelines.
+     *
+     * Internal jobs skip the client quote and deposit gates, so this is a
+     * governed action: it needs the lifecycle permission and a reason, and is
+     * written to the governance log. A job that already has client invoices or
+     * receipts is being billed to a client and cannot become internal. The job
+     * number is kept: costs and documents already refer to it.
+     */
+    public function changePipeline(Request $request, ProjectEnquiry $enquiry): JsonResponse
+    {
+        abort_unless(
+            $request->user()?->can(Permissions::PROJECT_LIFECYCLE_GOVERN),
+            403,
+            'You do not have permission to move jobs between the Internal and External pipelines.'
+        );
+
+        $validated = $request->validate([
+            'pipeline' => 'required|in:internal,external',
+            'reason' => 'required|string|min:10|max:1000',
+        ], ['reason.min' => 'Give a reason of at least 10 characters.']);
+
+        $toInternal = $validated['pipeline'] === 'internal';
+        if ($toInternal === $enquiry->isInternal()) {
+            return response()->json(['message' => 'This job is already on the '.$validated['pipeline'].' pipeline.'], 422);
+        }
+
+        if ($toInternal) {
+            $billed = \App\Modules\Finance\Models\ProjectInvoice::where('project_enquiry_id', $enquiry->id)
+                    ->whereNotIn('status', ['void', 'voided', 'cancelled'])->exists()
+                || $enquiry->payments()->whereNull('reversed_at')->exists();
+            if ($billed) {
+                return response()->json(['message' => 'This job has client invoices or receipts, so it is billed to a client and must stay external.'], 422);
+            }
+        }
+
+        $from = $enquiry->workflow_preset_type;
+        // Going back to External restores the kind of job it was before, when known.
+        $previousExternal = $toInternal ? null : \App\Models\GovernanceAuditLog::query()
+            ->where('project_enquiry_id', $enquiry->id)
+            ->where('gate_type', 'Pipeline Change')
+            ->latest('id')
+            ->get()
+            ->map(fn ($log) => $log->context['from'] ?? null)
+            ->first(fn ($preset) => $preset !== null && ! in_array($preset, ProjectEnquiry::INTERNAL_PRESETS, true));
+        $to = $toInternal ? ProjectEnquiry::DEFAULT_INTERNAL_PRESET : $previousExternal;
+
+        DB::transaction(function () use ($enquiry, $from, $to, $validated, $request) {
+            $enquiry->update(['workflow_preset_type' => $to]);
+            \App\Models\GovernanceAuditLog::create([
+                'project_enquiry_id' => $enquiry->id,
+                'user_id' => $request->user()->id,
+                'gate_type' => 'Pipeline Change',
+                'action_status' => 'authorized',
+                'model_type' => ProjectEnquiry::class,
+                'model_id' => $enquiry->id,
+                'message' => 'Moved to the '.$validated['pipeline'].' pipeline',
+                'context' => ['from' => $from, 'to' => $to, 'reason' => $validated['reason']],
+                'ip_address' => $request->ip(),
+            ]);
+        });
+
+        return response()->json([
+            'message' => $toInternal
+                ? 'Moved to Internal. Client quote and deposit checks no longer apply; the job number is unchanged.'
+                : 'Moved to External. Client quote and deposit checks now apply; the job number is unchanged.',
+            'data' => new \App\Modules\Projects\Resources\EnquiryResource($enquiry->fresh(['client', 'department', 'deliverables'])),
+        ]);
+    }
+
     public function destroy(ProjectEnquiry $enquiry): JsonResponse
     {
         return $this->safe(function () use ($enquiry) {
@@ -1200,7 +1282,7 @@ class EnquiryController extends Controller
         $officers = [];
 
         $bookQuery = app(\Illuminate\Pipeline\Pipeline::class)
-            ->send(ProjectEnquiry::with('client', 'projectOfficer', 'payments', 'quoteApprovals', 'enquiryTasks.quoteData'))
+            ->send(ProjectEnquiry::with('client', 'projectOfficer', 'payments', 'quoteApprovals', 'approvedQuoteData'))
             ->through([
                 \App\Modules\Projects\Filters\Enquiry\ViewTypeFilter::class,
             ])

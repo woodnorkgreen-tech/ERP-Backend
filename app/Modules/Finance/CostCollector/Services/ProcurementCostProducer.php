@@ -157,11 +157,23 @@ class ProcurementCostProducer
         // owned by the same cost centre from order through to receipt.
         $departmentId = $grn->purchaseOrder?->requisition?->department_id;
 
+        $unclassified = [];
+
         foreach ($grn->items->where('accepted', true) as $receiptItem) {
             $poItem = $receiptItem->purchaseOrderItem;
             $reqItem = $poItem?->requisitionItem;
             $code = $reqItem?->expenseCode?->code;
             if ($receiptItem->stock_status === 'awaiting_inspection') continue;
+            // A reversed receipt received nothing; its lines are already backed out.
+            if ($receiptItem->reversed_at) continue;
+
+            // Report 76A Part 2, Decision B. A line that is not a Stores item —
+            // a service, an outsourced job, goods used directly — never sits on
+            // a shelf and is never issued, so its receipt is the moment the
+            // cost is incurred. It is posted as the ACTUAL, to the work in
+            // progress or expense account its category names, and never to
+            // Inventory.
+            $nonStock = self::isNonStock($poItem, $receiptItem);
             $effectiveQuantity = $receiptItem->inspection
                 ? (float) $receiptItem->inspection->accepted_quantity
                 : (float) $receiptItem->received_quantity;
@@ -199,8 +211,17 @@ class ProcurementCostProducer
 
             // An event retry is a no-op before it touches the active commitment.
             if (CostLine::where('source_type', GoodsReceiptNoteItem::class)
-                ->where('source_id', $receiptItem->id)->where('source_ref', 'accrual')->exists()) continue;
+                ->where('source_id', $receiptItem->id)->whereIn('source_ref', CostLine::RECEIPT_LIABILITY_REFS)->exists()) continue;
 
+            // The debit of a non-stock cost comes from its expense category and
+            // from nowhere else. A category with no account mapped leaves no
+            // honest debit — Inventory would be false, a default expense a
+            // guess — so the line is left unposted, its commitment still
+            // standing, and the receipt reports exactly what is missing.
+            if ($nonStock && ! $reqItem->expenseCode->default_debit_account_id) {
+                $unclassified[] = ($poItem->custom_description ?: "order line {$poItem->id}")." (category {$code})";
+                continue;
+            }
             $activeCommitment = CostLine::where('nature', CostLine::NATURE_COMMITTED)
                 ->where('status', CostLine::STATUS_VERIFIED)
                 ->where('details->purchase_order_item_id', $poItem->id)
@@ -221,18 +242,25 @@ class ProcurementCostProducer
             $quantity = (string) $effectiveQuantity;
             $amount = bcmul($quantity, (string) $poItem->unit_price, 2);
             $this->collector->postFromSource(new CostContext(
-                expenseCode: (string) ($code ?? ''), amount: $amount, nature: CostLine::NATURE_ACCRUED,
+                expenseCode: (string) ($code ?? ''), amount: $amount,
+                // Stocked: accrued, awaiting its Stores issue. Non-stock: the
+                // actual, here and only here — the supplier's bill moves the
+                // liability and never adds a second cost.
+                nature: $nonStock ? CostLine::NATURE_ACTUAL : CostLine::NATURE_ACCRUED,
                 enquiryId: $enquiryId,
                 jobNumber: $jobNumber,
                 departmentId: $departmentId ? (int) $departmentId : null,
                 sourceType: GoodsReceiptNoteItem::class, sourceId: $receiptItem->id,
-                sourceRef: 'accrual', incurredAt: (string) $grn->date,
+                sourceRef: $nonStock ? 'receipt-actual' : 'accrual', incurredAt: (string) $grn->date,
                 payeeType: 'SUPPLIER', payeeId: $grn->purchaseOrder?->supplier_id,
                 payeeName: $grn->purchaseOrder?->supplier?->supplier_name,
                 consumesLineId: $planned?->id,
                 description: $poItem->custom_description ?: "Accepted goods: {$grn->grn_number}",
                 details: array_filter([
-                    'budget_category' => $planned?->details['budget_category'] ?? 'materials',
+                    // A non-stock purchase is not "materials" unless its budget line says so.
+                    'budget_category' => $planned?->details['budget_category'] ?? ($nonStock ? null : 'materials'),
+                    'non_stock_receipt' => $nonStock ?: null,
+                    'unbudgeted' => ($nonStock && ! $planned && $enquiryId) ? true : null,
                     'element' => $planned?->details['element'] ?? null,
                     'purchase_order_item_id' => $poItem->id,
                     'grn_number' => $grn->grn_number,
@@ -250,13 +278,13 @@ class ProcurementCostProducer
             ));
 
             $acceptedToDate = (string) GoodsReceiptNoteItem::with('inspection')
-                ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)->get()
+                ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)->whereNull('reversed_at')->get()
                 ->sum(fn ($line) => $line->stock_status === 'awaiting_inspection' ? 0 : ($line->inspection
                     ? (float) $line->inspection->accepted_quantity : (float) $line->received_quantity));
             $remaining = bcsub((string) $poItem->quantity, $acceptedToDate, 3);
             if (bccomp($remaining, '0', 3) === 1) {
                 $this->collector->postFromSource(new CostContext(
-                    expenseCode: $code,
+                    expenseCode: (string) ($code ?? ''),
                     amount: bcmul($remaining, (string) $poItem->unit_price, 2),
                     nature: CostLine::NATURE_COMMITTED,
                     enquiryId: $enquiryId,
@@ -280,9 +308,108 @@ class ProcurementCostProducer
             $posted++;
         }
 
+        if ($unclassified !== []) {
+            throw new \InvalidArgumentException(
+                'ACCOUNTING CONFIGURATION REQUIRED — EXPENSE CATEGORY ACCOUNT. '
+                .'Receipt '.$grn->grn_number.' includes purchases that are not Stores items ('.implode('; ', $unclassified).') '
+                .'and their expense category has no account mapped, so there is nowhere to charge them. '
+                .'They were not posted to Inventory or to a default expense. Map the category in Finance Setup, then send this posting again.'
+            );
+        }
+
         return $posted;
     }
 
+    /**
+     * Is this receipt line a purchase that is NOT Stores inventory?
+     *
+     * Decided by what the system already records, in this order:
+     *
+     *   - a line that names a library material, or that Stores has put on the
+     *     shelf, is stock — whatever its category says;
+     *   - otherwise its expense category decides: the "Direct materials"
+     *     family is stock (Stores will match the delivery to a material when
+     *     it confirms it); every other family — services, subcontractors,
+     *     transport, overheads — is not;
+     *   - a line with neither a material nor a category cannot be classified.
+     *     It keeps the long-standing treatment (accrued as stock, flagged
+     *     `unclassified_expense_code`); requisitions can no longer be approved
+     *     without a category, so only older orders reach here.
+     *
+     * No new flag: the category family is the same line the direct-bill form
+     * already draws between a materials purchase and everything else.
+     */
+    public static function isNonStock(?PurchaseOrderItem $poItem, ?GoodsReceiptNoteItem $receiptItem = null): bool
+    {
+        if (! $poItem || $poItem->material_id || $receiptItem?->material_id
+            || $receiptItem?->inventory_log_id || $receiptItem?->stock_status === 'posted') {
+            return false;
+        }
+        $code = $poItem->requisitionItem?->expenseCode;
+
+        return $code !== null && ! $code->isStockMaterial();
+    }
+
+    /**
+     * Put a reversed receipt line's value back on order (Report 76A Part 2 §8).
+     *
+     * The receipt released the order line's commitment for what arrived; with
+     * the receipt reversed, that quantity is on order again. Whatever is still
+     * committed for the line is retired and one commitment is posted for the
+     * whole outstanding quantity, under a key of its own so a repeat is a no-op.
+     */
+    public function restoreCommitmentAfterReceiptReversal(GoodsReceiptNoteItem $receiptItem): void
+    {
+        $receiptItem->loadMissing(['purchaseOrderItem.requisitionItem.expenseCode', 'goodsReceiptNote.purchaseOrder.supplier', 'goodsReceiptNote.purchaseOrder.requisition']);
+        $poItem = $receiptItem->purchaseOrderItem;
+        $po = $receiptItem->goodsReceiptNote?->purchaseOrder;
+        if (! $poItem || ! $po) {
+            return;
+        }
+
+        CostLine::where('nature', CostLine::NATURE_COMMITTED)->where('status', CostLine::STATUS_VERIFIED)
+            ->where('details->purchase_order_item_id', $poItem->id)->get()
+            ->each(fn (CostLine $line) => $this->collector->releaseCommitment(
+                $line, "Restated after receipt {$receiptItem->goodsReceiptNote->grn_number} was reversed."
+            ));
+
+        $accepted = (string) GoodsReceiptNoteItem::with('inspection')
+            ->where('purchase_order_item_id', $poItem->id)->where('accepted', true)->whereNull('reversed_at')->get()
+            ->sum(fn ($line) => $line->stock_status === 'awaiting_inspection' ? 0 : ($line->inspection
+                ? (float) $line->inspection->accepted_quantity : (float) $line->received_quantity));
+        $outstanding = bcsub((string) $poItem->quantity, $accepted, 3);
+        if (bccomp($outstanding, '0', 3) !== 1) {
+            return;
+        }
+
+        $reqItem = $poItem->requisitionItem;
+        ['project_enquiry_id' => $enquiryId, 'job_number' => $jobNumber] = $this->identityFor($reqItem, $po->requisition);
+        $planned = $this->plannedLine($reqItem);
+        $departmentId = $po->requisition?->department_id;
+
+        $this->collector->postFromSource(new CostContext(
+            expenseCode: (string) ($reqItem?->expenseCode?->code ?? ''),
+            amount: bcmul($outstanding, (string) $poItem->unit_price, 2),
+            nature: CostLine::NATURE_COMMITTED,
+            enquiryId: $enquiryId ? (int) $enquiryId : null,
+            jobNumber: $jobNumber,
+            departmentId: $departmentId ? (int) $departmentId : null,
+            sourceType: GoodsReceiptNoteItem::class, sourceId: $receiptItem->id,
+            sourceRef: 'commitment-after-reversal',
+            payeeType: 'SUPPLIER', payeeId: $po->supplier_id,
+            payeeName: $po->supplier?->supplier_name,
+            consumesLineId: $planned?->id,
+            description: "On order again after receipt {$receiptItem->goodsReceiptNote->grn_number} was reversed",
+            details: array_filter([
+                'budget_category' => $planned?->details['budget_category'] ?? null,
+                'element' => $planned?->details['element'] ?? null,
+                'po_number' => $po->po_number,
+                'purchase_order_item_id' => $poItem->id,
+                'quantity' => $outstanding,
+                'unit_price' => $poItem->unit_price,
+            ], fn ($value) => $value !== null),
+        ));
+    }
     /**
      * The enquiry and job number a purchase-order line is costed against.
      *

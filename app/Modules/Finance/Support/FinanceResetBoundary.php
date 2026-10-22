@@ -23,6 +23,9 @@ final class FinanceResetBoundary
 {
     /** Delete in this order. Tables absent from a schema are skipped (Phase 2B tables before migration). */
     public const RESET_ORDER = [
+        // Report 76A: the posting log describes cost lines and journals that a
+        // reset removes; left behind it would report postings that no longer exist.
+        'finance_event_postings',
         // W7 / W6 analytical records
         'project_labour_actual_returns',
         'project_labour_actuals',
@@ -76,6 +79,14 @@ final class FinanceResetBoundary
         'salary_advance_requests',
         'payroll_runs',
         // Procurement-to-pay documents
+        // Report 76A-3: a bill's lines, the receipts they cover, and the
+        // documents that correct it — reset with the bills they belong to,
+        // children first.
+        'bill_line_receipt_allocations',
+        'supplier_credit_note_lines',
+        'supplier_credit_notes',
+        'receipt_accrual_closeouts',
+        'bill_lines',
         'bills',
         'goods_receipt_inspections',
         'goods_receipt_note_items',
@@ -94,7 +105,8 @@ final class FinanceResetBoundary
      */
     public const CONFIRM_ON_PRODUCTION = [
         'project_invoices', 'project_invoice_lines', 'project_invoice_allocations', 'client_receipts',
-        'bills', 'bill_payments', 'goods_receipt_notes', 'goods_receipt_note_items', 'goods_receipt_inspections',
+        'bills', 'bill_lines', 'bill_line_receipt_allocations', 'supplier_credit_notes', 'supplier_credit_note_lines',
+        'receipt_accrual_closeouts', 'bill_payments', 'goods_receipt_notes', 'goods_receipt_note_items', 'goods_receipt_inspections',
         'purchase_orders', 'purchase_order_items', 'spend_vouchers', 'spend_voucher_allocations',
         'finance_reconciliation_statements', 'finance_statement_transactions', 'finance_statement_matches',
         'finance_cash_movements', 'finance_attachments',

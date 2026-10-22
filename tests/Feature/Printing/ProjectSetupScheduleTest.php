@@ -68,19 +68,19 @@ class ProjectSetupScheduleTest extends TestCase
         $done = $this->design('2026-09-01', ['status' => 'handed_off']);
 
         $this->getJson('/api/design/jobs?per_page=1')->assertOk()
-            ->assertJsonPath('total', 4)->assertJsonPath('data.0.id', $near->id)
+            ->assertJsonPath('total', 3)->assertJsonPath('data.0.id', $near->id)
             ->assertJsonPath('data.0.project_setup_date', '2026-09-25')
             ->assertJsonPath('data.0.due_date', '2026-12-01');
         $this->getJson('/api/design/jobs?per_page=1&page=2')->assertOk()->assertJsonPath('data.0.id', $far->id);
         $this->getJson('/api/design/jobs?per_page=1&page=3')->assertOk()
             ->assertJsonPath('data.0.id', $tbc->id)->assertJsonPath('data.0.project_setup_date', null);
-        $this->getJson('/api/design/jobs?per_page=1&page=4')->assertOk()->assertJsonPath('data.0.id', $done->id);
+        $this->getJson('/api/design/jobs?schedule_scope=all&per_page=1&page=4')->assertOk()->assertJsonPath('data.0.id', $done->id);
         $this->getJson('/api/design/jobs?due_within_days=7')->assertOk()
-            ->assertJsonPath('total', 3)->assertJsonPath('counts.all', 3)->assertJsonPath('counts.pending', 2);
+            ->assertJsonPath('total', 2)->assertJsonPath('counts.all', 2)->assertJsonPath('counts.pending', 2);
 
         DB::table('project_enquiries')->where('id', $near->project_enquiry_id)->update(['expected_delivery_date' => '2026-11-01']);
         $this->getJson('/api/design/jobs?due_within_days=7')->assertOk()
-            ->assertJsonPath('total', 2)->assertJsonPath('counts.pending', 1);
+            ->assertJsonPath('total', 1)->assertJsonPath('counts.pending', 1);
     }
 
     public function test_printing_uses_live_project_dates_ahead_of_status_and_creation_order(): void
@@ -90,10 +90,12 @@ class ProjectSetupScheduleTest extends TestCase
         $tbc = $this->printJob(null);
         $completed = $this->printJob('2026-09-01', ['status' => 'completed']);
 
-        foreach ([$near, $far, $tbc, $completed] as $index => $job) {
+        foreach ([$near, $far, $tbc] as $index => $job) {
             $this->getJson('/api/printing/jobs?per_page=1&page='.($index + 1))->assertOk()
-                ->assertJsonPath('total', 4)->assertJsonPath('data.0.id', $job->id);
+                ->assertJsonPath('total', 3)->assertJsonPath('data.0.id', $job->id);
         }
+        $this->getJson('/api/printing/jobs?schedule_scope=all&per_page=1&page=4')->assertOk()
+            ->assertJsonPath('total', 4)->assertJsonPath('data.0.id', $completed->id);
 
         DB::table('project_enquiries')->where('id', $near->project_enquiry_id)->update(['expected_delivery_date' => null]);
         $this->getJson('/api/printing/jobs?per_page=1')->assertOk()->assertJsonPath('data.0.id', $far->id);
@@ -107,20 +109,26 @@ class ProjectSetupScheduleTest extends TestCase
 
     public function test_upcoming_printing_sorts_by_parent_setup_and_keeps_tbc_last(): void
     {
-        $items = [];
+        $jobs = [];
         foreach (['2026-09-25', '2026-10-20', null] as $date) {
             $job = $this->design($date);
-            $items[] = DesignItem::create(['design_job_id' => $job->id, 'stream' => 'graphic', 'title' => 'Setup artwork', 'status' => 'in_design']);
+            DB::table('project_deliverables')->insert([
+                'enquiry_id' => $job->project_enquiry_id, 'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                'persistent_id' => uniqid('el-'), 'element_type' => 'graphic', 'classification' => 'graphic',
+                'name' => 'Setup banner', 'category' => 'production', 'is_included' => true,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $jobs[] = $job;
         }
-        foreach ($items as $index => $item) {
+        foreach ($jobs as $index => $job) {
             $this->getJson('/api/printing/upcoming-jobs?per_page=1&page='.($index + 1))->assertOk()
-                ->assertJsonPath('total', 3)->assertJsonPath('data.0.design_item_id', $item->id);
+                ->assertJsonPath('total', 3)->assertJsonPath('data.0.design_job_id', $job->id);
         }
         $this->getJson('/api/printing/upcoming-jobs?per_page=1&page=3')->assertOk()->assertJsonPath('data.0.project_setup_date', null);
 
-        DB::table('project_enquiries')->where('id', $items[2]->job->project_enquiry_id)->update(['expected_delivery_date' => '2026-09-24']);
+        DB::table('project_enquiries')->where('id', $jobs[2]->project_enquiry_id)->update(['expected_delivery_date' => '2026-09-24']);
         $this->getJson('/api/printing/upcoming-jobs?per_page=1')->assertOk()
-            ->assertJsonPath('data.0.design_item_id', $items[2]->id)->assertJsonPath('data.0.project_setup_date', '2026-09-24');
+            ->assertJsonPath('data.0.design_job_id', $jobs[2]->id)->assertJsonPath('data.0.project_setup_date', '2026-09-24');
     }
 
     public function test_project_only_links_resolve_the_same_date_in_all_tables(): void
@@ -133,7 +141,8 @@ class ProjectSetupScheduleTest extends TestCase
         $printing = PrintJob::create(['project_id' => $projectId, 'title' => 'Project-only print']);
         DesignItem::create(['design_job_id' => $design->id, 'stream' => 'graphic', 'title' => 'Project-only artwork']);
 
-        foreach (['/api/design/jobs', '/api/printing/jobs', '/api/printing/upcoming-jobs'] as $url) {
+        // Project-only design jobs (no enquiry) are not listed in printing's upcoming projects yet.
+        foreach (['/api/design/jobs', '/api/printing/jobs'] as $url) {
             $this->getJson($url)->assertOk()->assertJsonPath('data.0.project_setup_date', '2026-09-28');
         }
         $this->getJson('/api/design/jobs/'.$design->id)->assertOk()->assertJsonPath('data.project_setup_date', '2026-09-28');
@@ -159,6 +168,52 @@ class ProjectSetupScheduleTest extends TestCase
         DB::table('project_enquiries')->where('id', $recent->project_enquiry_id)->update(['expected_delivery_date' => null]);
         $this->getJson('/api/design/jobs?overdue_only=1')->assertOk()->assertJsonPath('total', 1);
         $this->getJson('/api/design/jobs?overdue_only=invalid')->assertUnprocessable();
+    }
+
+    public function test_job_tables_default_to_today_and_future_with_overdue_and_history_views(): void
+    {
+        foreach (['2026-09-23', '2026-09-24', '2026-09-25', null] as $date) {
+            $design = $this->design($date);
+            DesignItem::create(['design_job_id' => $design->id, 'stream' => 'graphic', 'title' => 'Artwork',
+                'status' => 'in_design', 'assigned_to' => auth()->id()]);
+            $this->printJob($date, ['operator_id' => auth()->id()]);
+        }
+        $this->design('2026-09-22', ['status' => 'handed_off']);
+        $this->printJob('2026-09-22', ['status' => 'completed']);
+
+        foreach (DB::table('project_enquiries')->pluck('id') as $enquiryId) {
+            DB::table('project_deliverables')->insert([
+                'enquiry_id' => $enquiryId, 'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                'persistent_id' => uniqid('el-'), 'element_type' => 'graphic', 'classification' => 'graphic',
+                'name' => 'Scope banner', 'category' => 'production', 'is_included' => true,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        foreach (['', '?schedule_scope=overdue', '?schedule_scope=all'] as $query) {
+            $designTotal = $this->getJson('/api/design/jobs'.$query)->json('total');
+            $this->getJson('/api/printing/upcoming-jobs'.$query)->assertOk()->assertJsonPath('total', $designTotal);
+        }
+
+        foreach (['/api/design/jobs', '/api/design/graphic/items', '/api/design/graphic/bundles',
+            '/api/printing/jobs', '/api/printing/job-bundles'] as $url) {
+            $this->getJson($url)->assertOk()->assertJsonPath('total', 3);
+            $this->getJson($url.'?schedule_scope=overdue')->assertOk()->assertJsonPath('total', 1);
+        }
+
+        $this->getJson('/api/design/jobs?schedule_scope=all')->assertOk()->assertJsonPath('total', 5);
+        $this->getJson('/api/printing/jobs?schedule_scope=all')->assertOk()->assertJsonPath('total', 5);
+        $this->getJson('/api/printing/job-bundles?schedule_scope=all')->assertOk()->assertJsonPath('total', 5);
+        $this->getJson('/api/design/graphic/items?schedule_scope=all')->assertOk()->assertJsonPath('total', 4);
+        $this->getJson('/api/design/graphic/bundles?mine=1')->assertOk()
+            ->assertJsonPath('my_work_active_count', 3)->assertJsonPath('total', 3);
+        $this->getJson('/api/printing/job-bundles?mine=1')->assertOk()
+            ->assertJsonPath('my_work_active_count', 3)->assertJsonPath('total', 3);
+        $this->getJson('/api/design/graphic/bundles?schedule_scope=overdue&mine=1')->assertOk()
+            ->assertJsonPath('my_work_active_count', 1)->assertJsonPath('total', 1);
+        $this->getJson('/api/printing/job-bundles?schedule_scope=overdue&mine=1')->assertOk()
+            ->assertJsonPath('my_work_active_count', 1)->assertJsonPath('total', 1);
+        $this->getJson('/api/printing/jobs?schedule_scope=invalid')->assertUnprocessable();
     }
 
     public function test_graphic_and_structural_overdue_filters_exclude_finished_and_unconfirmed_work(): void
@@ -210,7 +265,7 @@ class ProjectSetupScheduleTest extends TestCase
         }
         DesignItem::create(['design_job_id' => $job->id, 'title' => 'Deleted artwork', 'stream' => 'structural', 'assigned_to' => $removed->id])->delete();
 
-        $this->getJson('/api/design/jobs')->assertOk()->assertJsonPath('data.0.designers', [
+        $this->getJson('/api/design/jobs?schedule_scope=all')->assertOk()->assertJsonPath('data.0.designers', [
             ['id' => $amina->id, 'name' => 'Amina Designer'],
             ['id' => $brian->id, 'name' => 'Brian Designer'],
         ]);

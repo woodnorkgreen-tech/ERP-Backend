@@ -45,6 +45,8 @@ class CostSettlementModeTest extends TestCase
             Permissions::FINANCE_COSTS_READ,
             Permissions::FINANCE_SPEND_VOUCHERS_CREATE,
             Permissions::FINANCE_SPEND_VOUCHERS_READ,
+            // Report 76A Part 2 (Decision E): a company-paid verification moves money.
+            Permissions::FINANCE_PETTY_CASH_CREATE,
         ] as $name) {
             Permission::findOrCreate($name, 'web');
         }
@@ -64,6 +66,7 @@ class CostSettlementModeTest extends TestCase
 
         $this->verifier = User::factory()->create(['is_active' => true, 'name' => 'Finance Verifier']);
         $this->verifier->givePermissionTo([
+            Permissions::FINANCE_PETTY_CASH_CREATE,
             Permissions::FINANCE_COSTS_READ,
             Permissions::FINANCE_SPEND_VOUCHERS_CREATE,
             Permissions::FINANCE_SPEND_VOUCHERS_READ,

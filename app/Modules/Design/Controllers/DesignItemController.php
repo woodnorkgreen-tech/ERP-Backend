@@ -19,6 +19,7 @@ use App\Modules\Design\Support\DesignPauseReason;
 use App\Modules\Printing\Services\PrintIntakeService;
 use App\Support\ProjectSetupSchedule;
 use Illuminate\Http\JsonResponse;
+use App\Modules\Design\Models\DesignUpdate;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -55,25 +56,38 @@ class DesignItemController extends Controller
     {
         $request->validate([
             'overdue_only' => ['sometimes', 'boolean'],
+            'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
             'search' => ['nullable', 'string', 'max:255'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'mine' => ['sometimes', 'boolean'],
         ]);
+        $scope = $request->boolean('overdue_only') ? 'overdue' : $request->input('schedule_scope', 'upcoming');
         $query = DesignItem::where('stream', $stream);
-        $myActiveCount = DesignItem::query()
+        $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
-            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'])
-            ->count();
+            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off']);
+        if ($scope === 'overdue') {
+            DesignSchedule::overdueItems($myActiveQuery);
+        } else {
+            ProjectSetupSchedule::filterDateScope($myActiveQuery, DesignSchedule::itemDateQuery(), $scope);
+        }
+        $myActiveCount = $myActiveQuery->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         if ($myWorkApplied) {
             $query->where('assigned_to', auth()->id());
         }
 
-        if ($request->boolean('overdue_only')) {
+        if ($scope === 'overdue') {
             DesignSchedule::overdueItems($query);
+        } else {
+            ProjectSetupSchedule::filterDateScope($query, DesignSchedule::itemDateQuery(), $scope);
+        }
+
+        if ($request->boolean('outsourced_only')) {
+            $query->whereNotNull('outsourced_partner_name');
         }
 
         if ($request->filled('design_job_id')) {
@@ -124,27 +138,40 @@ class DesignItemController extends Controller
     {
         $request->validate([
             'overdue_only' => ['sometimes', 'boolean'],
+            'schedule_scope' => ['sometimes', Rule::in(['upcoming', 'overdue', 'all'])],
             'search' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', 'max:50'],
             'mine' => ['sometimes', 'boolean'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
+        $scope = $request->boolean('overdue_only') ? 'overdue' : $request->input('schedule_scope', 'upcoming');
 
-        $myActiveCount = DesignItem::query()
+        $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
-            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off'])
-            ->count();
+            ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off']);
+        if ($scope === 'overdue') {
+            DesignSchedule::overdueItems($myActiveQuery);
+        } else {
+            ProjectSetupSchedule::filterDateScope($myActiveQuery, DesignSchedule::itemDateQuery(), $scope);
+        }
+        $myActiveCount = $myActiveQuery->count();
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         $candidateQuery = DesignItem::query()->where('stream', $stream);
         if ($myWorkApplied) {
             $candidateQuery->where('assigned_to', auth()->id());
         }
-        if ($request->boolean('overdue_only')) {
+        if ($scope === 'overdue') {
             DesignSchedule::overdueItems($candidateQuery);
+        } else {
+            ProjectSetupSchedule::filterDateScope($candidateQuery, DesignSchedule::itemDateQuery(), $scope);
         }
+        if ($request->boolean('outsourced_only')) {
+            $query->whereNotNull('outsourced_partner_name');
+        }
+
         if ($request->filled('design_job_id')) {
             $candidateQuery->where('design_job_id', $request->integer('design_job_id'));
         }
@@ -262,6 +289,40 @@ class DesignItemController extends Controller
         return 'job:' . $item->design_job_id;
     }
 
+    /**
+     * Outsourcing a design item is open to anyone in design (creatives.view, held by the Designer role).
+     * Clearing it or assigning an internal designer does not need the check.
+     */
+    private function applyOutsourcing(StoreDesignItemRequest $request, array $data): array
+    {
+        if (array_key_exists('outsourced', $data)) {
+            abort_unless($request->user()?->can(\App\Constants\Permissions::CREATIVES_VIEW), 403);
+        }
+
+        return \App\Support\Outsourcing\OutsourcingAssignment::apply($data, 'assigned_to', $request->user()?->id);
+    }
+
+    /**
+     * Write a design history note when the outsourcing partner or reason changed on the last save.
+     * Uses the item's own change tracking, so unrelated edits add no history.
+     */
+    private function recordOutsourcingChange(DesignItem $item): void
+    {
+        if (! $item->wasRecentlyCreated && ! $item->wasChanged(['outsourced_partner_name', 'outsourced_reason'])) {
+            return;
+        }
+
+        DesignUpdate::create([
+            'design_item_id' => $item->id,
+            'note' => \App\Support\Outsourcing\OutsourcingAssignment::historyNote(
+                $item->outsourced_partner_name,
+                $item->outsourced_reason,
+                $item->outsourced_reason_note,
+            ),
+            'created_by' => auth()->id(),
+        ]);
+    }
+
     private function bundleDescriptor(string $key): array
     {
         [$type, $id] = explode(':', $key, 2);
@@ -271,14 +332,18 @@ class DesignItemController extends Controller
 
     public function store(StoreDesignItemRequest $request, DesignJob $job, string $stream): JsonResponse
     {
-        $data = $this->dimensions->normalize($request->validated());
+        $data = $this->applyOutsourcing($request, $this->dimensions->normalize($request->validated()));
         $data['stream'] = $stream;
         $data['destination'] = $data['destination'] ?? ($stream === DesignItem::STREAM_GRAPHIC ? 'printing' : 'production');
         $data['design_job_id'] = $job->id;
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
 
-        $item = DesignItem::create($data)->load(['job.documents', 'assignedUser:id,name', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs', 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS]);
+        $item = DesignItem::create($data);
+        if ($item->outsourced_partner_name !== null) {
+            $this->recordOutsourcingChange($item);
+        }
+        $item->load(['job.documents', 'assignedUser:id,name', 'type', 'printMaterial', 'documents', 'bomItems.material.baseUom', 'handoffs', 'workSessions.user:id,name', 'workSessions.endedBy:id,name', ...self::HISTORY_RELATIONS]);
 
         $this->notifications->notifyItemAssigned($item);
 
@@ -293,7 +358,7 @@ class DesignItemController extends Controller
         $previousAssignedTo = $item->assigned_to;
         $previousStatus = $item->status;
 
-        $data = $this->dimensions->normalize($request->validated());
+        $data = $this->applyOutsourcing($request, $this->dimensions->normalize($request->validated()));
         $data['updated_by'] = auth()->id();
 
         if (array_key_exists('status', $data) && $data['status'] !== 'print_ready' && $previousStatus === 'print_ready') {
@@ -301,6 +366,7 @@ class DesignItemController extends Controller
         }
 
         $item->update($data);
+        $this->recordOutsourcingChange($item);
 
         if (array_key_exists('status', $data) && $data['status'] !== $previousStatus) {
             if ($data['status'] === 'awaiting_client_approval') {

@@ -75,6 +75,18 @@ class Permissions
     const PROJECT_VIEW_REPORTS = 'project.view_reports';
     const PROJECT_CLOSE = 'project.close';
     const PROJECT_COSTS_READ_ASSIGNED = 'project.costs.read_assigned';
+    // Report 78C: lifecycle moves that used to be a free-text status edit.
+    // Cancelling and reactivating a job change what Stores and Procurement
+    // treat as live work, so they are governed actions with a reason.
+    const PROJECT_LIFECYCLE_GOVERN = 'project.lifecycle.govern';
+    const PROJECT_HOLD_MANAGE = 'project.hold.manage';
+    // Report 78C: recording that a requirement was fulfilled outside the ERP.
+    // Deliberately not a Stores permission — the person who issues stock should
+    // not also be the one who can make its outstanding demand disappear.
+    const PROJECT_MATERIALS_RETIRE_LEGACY = 'project_materials.retire_legacy';
+    // Report 78C: issue / board request / project requisition on a completed,
+    // closed or on-hold job, with a recorded reason (snag and remedial work).
+    const PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE = 'project_materials.closed_job_override';
 
     // ===========================================
     // ENQUIRY MANAGEMENT PERMISSIONS
@@ -328,6 +340,25 @@ class Permissions
     const CREATIVES_DESIGN_APPROVE = 'creatives.design.approve';
     const CREATIVES_MATERIALS_MANAGE = 'creatives.materials.manage';
 
+    // Printing permissions
+    const PRINTING_DASHBOARD_VIEW = 'printing.dashboard.view';
+    const PRINTING_JOBS_VIEW = 'printing.jobs.view';
+    const PRINTING_JOBS_CREATE = 'printing.jobs.create';
+    const PRINTING_JOBS_UPDATE = 'printing.jobs.update';
+    const PRINTING_JOBS_WORK = 'printing.jobs.work';
+    const PRINTING_JOBS_ASSIGN = 'printing.jobs.assign';
+    const PRINTING_JOBS_REPRINT = 'printing.jobs.reprint';
+    const PRINTING_JOBS_CORRECT = 'printing.jobs.correct';
+    const PRINTING_MATERIALS_VIEW = 'printing.materials.view';
+    const PRINTING_MATERIALS_REQUEST = 'printing.materials.request';
+    const PRINTING_MATERIALS_REQUESTS_DELETE = 'printing.materials.requests.delete';
+    const PRINTING_MATERIALS_CONSUME = 'printing.materials.consume';
+    const PRINTING_ROLLS_CREATE = 'printing.rolls.create';
+    const PRINTING_ROLLS_UPDATE = 'printing.rolls.update';
+    const PRINTING_ROLLS_ADJUST = 'printing.rolls.adjust';
+    const PRINTING_ROLLS_DELETE = 'printing.rolls.delete';
+    const PRINTING_HISTORY_IMPORT = 'printing.history.import';
+
     // ===========================================
     // CLIENT SERVICE PERMISSIONS
     // ===========================================
@@ -553,6 +584,8 @@ class Permissions
             self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
             self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
             self::PROJECT_COSTS_READ_ASSIGNED,
+            self::PROJECT_LIFECYCLE_GOVERN, self::PROJECT_HOLD_MANAGE,
+            self::PROJECT_MATERIALS_RETIRE_LEGACY, self::PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE,
 
             // Enquiry Management
             self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -625,6 +658,15 @@ class Permissions
             // Creatives Permissions
             self::CREATIVES_VIEW, self::CREATIVES_DESIGN_CREATE, self::CREATIVES_DESIGN_UPDATE,
             self::CREATIVES_DESIGN_APPROVE, self::CREATIVES_MATERIALS_MANAGE,
+
+            // Printing Permissions
+            self::PRINTING_DASHBOARD_VIEW, self::PRINTING_JOBS_VIEW, self::PRINTING_JOBS_CREATE,
+            self::PRINTING_JOBS_UPDATE, self::PRINTING_JOBS_WORK, self::PRINTING_JOBS_ASSIGN,
+            self::PRINTING_JOBS_REPRINT, self::PRINTING_JOBS_CORRECT, self::PRINTING_MATERIALS_VIEW,
+            self::PRINTING_MATERIALS_REQUEST, self::PRINTING_MATERIALS_REQUESTS_DELETE,
+            self::PRINTING_MATERIALS_CONSUME, self::PRINTING_ROLLS_CREATE,
+            self::PRINTING_ROLLS_UPDATE, self::PRINTING_ROLLS_ADJUST,
+            self::PRINTING_ROLLS_DELETE, self::PRINTING_HISTORY_IMPORT,
 
             // Client Service Permissions
             self::CLIENT_CREATE, self::CLIENT_READ, self::CLIENT_UPDATE, self::CLIENT_DELETE,
@@ -700,6 +742,8 @@ class Permissions
                 self::PROJECT_CREATE, self::PROJECT_READ, self::PROJECT_UPDATE, self::PROJECT_DELETE,
                 self::PROJECT_ASSIGN_USERS, self::PROJECT_VIEW_REPORTS, self::PROJECT_CLOSE,
                 self::PROJECT_COSTS_READ_ASSIGNED,
+                self::PROJECT_LIFECYCLE_GOVERN, self::PROJECT_HOLD_MANAGE,
+                self::PROJECT_MATERIALS_RETIRE_LEGACY, self::PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE,
             ],
             'enquiry_management' => [
                 self::ENQUIRY_CREATE, self::ENQUIRY_READ, self::ENQUIRY_UPDATE, self::ENQUIRY_DELETE,
@@ -767,6 +811,15 @@ class Permissions
             'creatives' => [
                 self::CREATIVES_VIEW, self::CREATIVES_DESIGN_CREATE, self::CREATIVES_DESIGN_UPDATE,
                 self::CREATIVES_DESIGN_APPROVE, self::CREATIVES_MATERIALS_MANAGE,
+            ],
+            'printing' => [
+                self::PRINTING_DASHBOARD_VIEW, self::PRINTING_JOBS_VIEW, self::PRINTING_JOBS_CREATE,
+                self::PRINTING_JOBS_UPDATE, self::PRINTING_JOBS_WORK, self::PRINTING_JOBS_ASSIGN,
+                self::PRINTING_JOBS_REPRINT, self::PRINTING_JOBS_CORRECT, self::PRINTING_MATERIALS_VIEW,
+                self::PRINTING_MATERIALS_REQUEST, self::PRINTING_MATERIALS_REQUESTS_DELETE,
+                self::PRINTING_MATERIALS_CONSUME, self::PRINTING_ROLLS_CREATE,
+                self::PRINTING_ROLLS_UPDATE, self::PRINTING_ROLLS_ADJUST,
+                self::PRINTING_ROLLS_DELETE, self::PRINTING_HISTORY_IMPORT,
             ],
             'client_service' => [
                 self::CLIENT_CREATE, self::CLIENT_READ, self::CLIENT_UPDATE, self::CLIENT_DELETE,
@@ -879,6 +932,10 @@ class Permissions
             self::PROJECT_UPDATE => 'Modify Project Parameters',
             self::PROJECT_DELETE => 'Archive/Delete Projects',
             self::PROJECT_ASSIGN_USERS => 'Allocate Staff to Projects',
+            self::PROJECT_LIFECYCLE_GOVERN => 'Cancel or Reactivate Projects',
+            self::PROJECT_HOLD_MANAGE => 'Place and Release Project Holds',
+            self::PROJECT_MATERIALS_RETIRE_LEGACY => 'Retire Requirements Fulfilled Outside the ERP',
+            self::PROJECT_MATERIALS_CLOSED_JOB_OVERRIDE => 'Authorize Material Work on Completed, Closed or On-Hold Jobs',
 
             // Finance
             self::FINANCE_VIEW => 'Access Finance Module',
@@ -897,6 +954,24 @@ class Permissions
             self::STORES_BOARD_MANAGE => 'Manage Board Life Cycle and Requests',
             self::STORES_RECEIPT_INSPECT => 'Inspect Received Stores Goods',
             self::STORES_MOVEMENT_REVERSE => 'Reverse Stores Stock Movements',
+
+            self::PRINTING_DASHBOARD_VIEW => 'View Printing Dashboard',
+            self::PRINTING_JOBS_VIEW => 'View Print Jobs',
+            self::PRINTING_JOBS_CREATE => 'Create Print Jobs',
+            self::PRINTING_JOBS_UPDATE => 'Update Print Jobs',
+            self::PRINTING_JOBS_WORK => 'Record Printing Work',
+            self::PRINTING_JOBS_ASSIGN => 'Assign Print Jobs',
+            self::PRINTING_JOBS_REPRINT => 'Create Reprints and Redesign Requests',
+            self::PRINTING_JOBS_CORRECT => 'Correct Print Jobs',
+            self::PRINTING_MATERIALS_VIEW => 'View Printing Materials',
+            self::PRINTING_MATERIALS_REQUEST => 'Request Printing Materials',
+            self::PRINTING_MATERIALS_REQUESTS_DELETE => 'Delete Printing Material Requests',
+            self::PRINTING_MATERIALS_CONSUME => 'Record Printing Consumption',
+            self::PRINTING_ROLLS_CREATE => 'Create Printing Rolls',
+            self::PRINTING_ROLLS_UPDATE => 'Update Printing Rolls',
+            self::PRINTING_ROLLS_ADJUST => 'Adjust Printing Roll Balance',
+            self::PRINTING_ROLLS_DELETE => 'Delete Printing Rolls',
+            self::PRINTING_HISTORY_IMPORT => 'Import Printing History',
 
             self::ADMIN_ACCESS => 'Access System Control Panel',
             self::ADMIN_SETTINGS => 'Modify Global System Config',

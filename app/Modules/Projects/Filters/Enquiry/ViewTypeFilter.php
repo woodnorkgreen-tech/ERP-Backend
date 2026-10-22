@@ -12,11 +12,7 @@ class ViewTypeFilter
      * Any enquiry whose workflow_preset_type is in this list is treated as
      * an internal job and excluded from the external view, and vice versa.
      */
-    private const INTERNAL_PRESETS = [
-        'internal_job',
-        'internal_prod',
-        'sponsorship',
-    ];
+    private const INTERNAL_PRESETS = \App\Models\ProjectEnquiry::INTERNAL_PRESETS;
 
     public function handle(Builder $query, Closure $next)
     {

@@ -139,9 +139,13 @@ class StockLedgerIntegrityTest extends TestCase
     public function test_check_out_endpoint_refuses_to_oversell_and_reports_what_is_issuable(): void
     {
         $this->receive(3);
+        $departmentId = \Illuminate\Support\Facades\DB::table('departments')->insertGetId(['name' => 'Workshop', 'created_at' => now(), 'updated_at' => now()]);
+        $centreId = \Illuminate\Support\Facades\DB::table('cost_centres')->insertGetId(['code' => 'CC-LEDGER', 'name' => 'Workshop', 'hr_department_id' => $departmentId,
+            'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
         $response = $this->postJson('/api/procurement-stores/check-out', [
             'material_id' => $this->material->id,
             'quantity' => 4,
+            'issue_purpose' => 'internal_consumption', 'cost_centre_id' => $centreId, 'notes' => 'Used by the workshop itself',
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors('quantity');
@@ -150,23 +154,22 @@ class StockLedgerIntegrityTest extends TestCase
         $this->assertLedgerReconciles();
     }
 
-    public function test_setting_a_counted_balance_posts_an_adjustment_movement(): void
+    /**
+     * Report 76A Part 2: a balance typed into the settings screen moved stock
+     * on one person's word and never reached the accounts. It is refused, with
+     * or without a reason; the stock count is the way to correct a balance.
+     */
+    public function test_a_balance_cannot_be_typed_in_even_with_a_reason(): void
     {
         $this->receive(10);
-        $response = $this->postJson('/api/procurement-stores/update-settings', [
+        $this->postJson('/api/procurement-stores/update-settings', [
             'material_id' => $this->material->id,
             'stock_quantity' => 7,
             'stock_adjustment_reason' => 'Physical count — three tins damaged in storage',
-        ]);
+        ])->assertStatus(422)->assertJsonValidationErrors('stock_quantity');
 
-        $response->assertOk();
-        $this->assertSame(7.0, $this->onHand());
-
-        $adjustment = InventoryLog::where('material_id', $this->material->id)
-            ->where('type', 'adjustment')->sole();
-        $this->assertSame(-3.0, (float) $adjustment->quantity);
-        $this->assertStringContainsString('damaged in storage', $adjustment->notes);
-
+        $this->assertSame(10.0, $this->onHand());
+        $this->assertSame(0, InventoryLog::where('material_id', $this->material->id)->where('type', 'adjustment')->count());
         $this->assertLedgerReconciles();
     }
 
@@ -176,7 +179,7 @@ class StockLedgerIntegrityTest extends TestCase
         $this->postJson('/api/procurement-stores/update-settings', [
             'material_id' => $this->material->id,
             'stock_quantity' => 7,
-        ])->assertStatus(422)->assertJsonValidationErrors('stock_adjustment_reason');
+        ])->assertStatus(422)->assertJsonValidationErrors('stock_quantity');
 
         $this->assertSame(10.0, $this->onHand());
     }

@@ -92,6 +92,9 @@ class StagedBillingTest extends TestCase
             'accepted' => true, 'store_status' => 'confirmed', 'stock_status' => 'posted',
             'unit_price' => 5000,
         ]);
+        // The receipt reaches the ledger as it does in the application: its accrual
+        // is what a supplier invoice later clears (Report 76A-3).
+        event(new \App\Events\GoodsReceiptRecorded($note->id));
     }
 
     private function billPayload(float $amount, string $invoiceNumber): array
@@ -229,6 +232,9 @@ class StagedBillingTest extends TestCase
             'accepted' => true, 'store_status' => 'confirmed', 'stock_status' => 'posted',
             'unit_price' => 1000,
         ]);
+        // The receipt reaches the ledger as it does in the application: its accrual
+        // is what a supplier invoice later clears (Report 76A-3).
+        event(new \App\Events\GoodsReceiptRecorded($note->id));
 
         $payload = fn (float $amount, string $invoice) => [
             'purchase_order_id' => $order->id, 'bill_date' => now()->toDateString(),

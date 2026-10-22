@@ -59,6 +59,7 @@ class FinanceServiceProvider extends ServiceProvider
                 \App\Modules\Finance\CostCollector\Console\BackfillCostLineElementCommand::class,
                 \App\Modules\Finance\CostCollector\Console\RepostMisattributedStoresCostsCommand::class,
                 \App\Modules\Finance\Console\ClosePeriodCommand::class,
+                \App\Modules\Finance\Console\PostingHealthCommand::class,
                 \App\Modules\Finance\Console\BackfillTaxDocumentCommand::class,
                 \App\Modules\Finance\PettyCash\Console\ClearAllPettyCashDataCommand::class,
             ]);

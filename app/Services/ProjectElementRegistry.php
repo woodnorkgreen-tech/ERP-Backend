@@ -48,6 +48,8 @@ class ProjectElementRegistry
             }
             $removed = ProjectElement::where('enquiry_id', $enquiry->id)->whereNotIn('uuid', $kept)->get();
             foreach ($removed as $element) {
+                // Report 78B: not while stock is out against any of its lines.
+                $element->materials->each(fn (ElementMaterial $line) => app(MaterialLineIdentity::class)->assertRemovable($line));
                 $element->delete();
             }
             $changed = $changed || $removed->isNotEmpty();
@@ -117,6 +119,7 @@ class ProjectElementRegistry
                 $kept[] = $element->uuid;
             }
             foreach ($data->elements()->whereNotIn('uuid', $kept)->get() as $element) {
+                $element->materials->each(fn (ElementMaterial $line) => app(MaterialLineIdentity::class)->assertRemovable($line));
                 $element->delete();
             }
             ProjectEnquiry::whereKey($enquiry->id)->increment('elements_revision');
@@ -178,20 +181,59 @@ class ProjectElementRegistry
             if ($line->exists && in_array($line->id, $kept, true)) {
                 throw ValidationException::withMessages(['materials' => 'The same material line was submitted more than once.']);
             }
+
+            // Report 78B: identity is decided by MaterialLineIdentity, never by
+            // whatever the browser happened to hold (a stale screen or a
+            // restored draft used to erase a Stores resolution with null).
+            $identity = app(MaterialLineIdentity::class);
+            $libraryMaterialId = $line->exists ? $identity->effectiveId($line, $input)
+                : (array_key_exists('libraryMaterialId', $input) && filled($input['libraryMaterialId']) ? (int) $input['libraryMaterialId'] : null);
+            $previousId = $line->library_material_id ? (int) $line->library_material_id : null;
+            if ($line->exists && $libraryMaterialId !== $previousId) {
+                $identity->assertCanBecome($line, $libraryMaterialId, 'materials');
+            }
+            $unitChanged = $line->exists
+                && mb_strtolower(trim((string) $line->unit_of_measurement)) !== mb_strtolower(trim((string) $input['unitOfMeasurement']));
+            if ($line->exists && ($libraryMaterialId !== $previousId || $unitChanged)) {
+                // The approved reading of the unit no longer describes this line.
+                $line->forceFill(\App\Modules\ProcurementStores\Services\RequirementUnits::clearedSnapshot());
+            }
+            if ($libraryMaterialId !== null) {
+                // An identity supersedes any Stores classification of the unlinked line.
+                $line->forceFill(['requirement_disposition' => null]);
+            }
+
             $line->fill([
-                'library_material_id' => array_key_exists('libraryMaterialId', $input) ? $input['libraryMaterialId'] : $line->library_material_id,
+                'library_material_id' => $libraryMaterialId,
                 'description' => $input['description'], 'unit_of_measurement' => $input['unitOfMeasurement'],
                 'quantity' => $input['quantity'],
                 'unit_cost' => array_key_exists('unitCost', $input) ? $input['unitCost'] : $line->unit_cost,
                 'is_included' => $input['isIncluded'] ?? true, 'is_additional' => $input['isAdditional'] ?? false,
                 'notes' => array_key_exists('notes', $input) ? $input['notes'] : $line->notes,
-                'source_metadata' => $input['sourceMetadata'] ?? $line->source_metadata,
+                // Server-owned history (Stores resolutions) survives a client
+                // copy that predates it; the client's own keys still apply.
+                'source_metadata' => $this->mergeSourceMetadata($line->source_metadata, $input['sourceMetadata'] ?? null),
                 'sort_order' => $input['sortOrder'] ?? $index, 'archived_at' => null,
             ]);
             $line->save();
             $kept[] = $line->id;
         }
+        // Report 78B: a line with stock out against it is never silently removed.
+        $removed = $element->materials()->whereNotIn('id', $kept)->get();
+        $removed->each(fn (ElementMaterial $line) => app(MaterialLineIdentity::class)->assertRemovable($line));
         $element->materials()->whereNotIn('id', $kept)->delete();
+    }
+
+    /** Keys Stores writes onto a line; a materials-list save never removes them. */
+    private const SERVER_METADATA_KEYS = ['catalogue_resolution', 'catalogue_resolutions', 'disposition_history', 'material_request'];
+
+    private function mergeSourceMetadata(?array $stored, mixed $incoming): ?array
+    {
+        if (! is_array($incoming)) {
+            return $stored;
+        }
+
+        return array_merge($incoming, array_intersect_key($stored ?? [], array_flip(self::SERVER_METADATA_KEYS))) ?: null;
     }
 
     public function invalidateApprovals(TaskMaterialsData $data): void

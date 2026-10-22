@@ -3,9 +3,9 @@
 namespace App\Listeners;
 
 use App\Events\MaterialsListChanged;
+use App\Modules\Finance\Services\FinanceEventPoster;
 use App\Modules\Projects\Models\EnquiryTask;
 use App\Services\BudgetService;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -19,18 +19,40 @@ use Illuminate\Support\Facades\Log;
  * no state in which they are allowed to differ.
  *
  * Idempotent — `syncFromMaterialsList` rewrites from the materials list and
- * carries the budget's own rates across — so a replayed job is harmless.
+ * carries the budget's own rates across — so a repeated run is harmless.
+ *
+ * Not queued (Report 76A). "Every save drives it" was only true where a queue
+ * worker was running; without one the budget stopped following the materials
+ * list and nothing said so. It now runs in the saving request's own process,
+ * after the response has been sent, through FinanceEventPoster.
+ *
+ * A failure still cannot abort the materials save that triggered it — the
+ * poster never throws into its caller. What changed is where the failure goes:
+ * it used to be caught here and written to the log, invisible from every
+ * screen; it is now a failed posting Finance can see and send again.
  */
-class SyncBudgetWithMaterialsList implements ShouldQueue
+class SyncBudgetWithMaterialsList
 {
-    public function __construct(private BudgetService $budgets) {}
+    public function __construct(
+        private BudgetService $budgets,
+        private FinanceEventPoster $postings,
+    ) {}
 
     public function handle(MaterialsListChanged $event): void
     {
-        $materialsTask = EnquiryTask::find($event->materialsTaskId);
+        $this->postings->record(
+            FinanceEventPoster::BUDGET_MATERIALS_SYNC,
+            $event->materialsTaskId,
+            afterResponse: true,
+        );
+    }
+
+    public function post(array $payload, int $materialsTaskId): string
+    {
+        $materialsTask = EnquiryTask::find($materialsTaskId);
 
         if (! $materialsTask) {
-            return;
+            return 'materials task no longer exists';
         }
 
         $budgetTask = EnquiryTask::where('project_enquiry_id', $materialsTask->project_enquiry_id)
@@ -42,33 +64,17 @@ class SyncBudgetWithMaterialsList implements ShouldQueue
         // itself when it is first opened, so nothing is lost by there being
         // nothing to push into.
         if (! $budgetTask) {
-            return;
+            return 'no budget task yet';
         }
 
-        try {
-            $result = $this->budgets->syncFromMaterialsList($budgetTask->id);
+        $result = $this->budgets->syncFromMaterialsList($budgetTask->id);
 
-            Log::info('Budget synced with materials list', [
-                'materials_task_id' => $event->materialsTaskId,
-                'budget_task_id' => $budgetTask->id,
-                'reopened' => $result['reopened'],
-            ]);
-        } catch (\Throwable $e) {
-            // Logged, never rethrown. In production this is queued, but the test
-            // queue runs inline — and rethrowing there made a budget-sync problem
-            // abort the materials save that triggered it, which is precisely
-            // the coupling every other producer in this codebase avoids: a
-            // downstream ledger must never stop someone saving their work.
-            //
-            // The failure is still loud. A budget left behind its materials
-            // list is the exact thing this listener exists to prevent
-            // and it is invisible from every screen, so it belongs in the log
-            // even though it must not propagate.
-            Log::error('Budget could not be synced with materials list', [
-                'materials_task_id' => $event->materialsTaskId,
-                'budget_task_id' => $budgetTask->id,
-                'error' => $e->getMessage(),
-            ]);
-        }
+        Log::info('Budget synced with materials list', [
+            'materials_task_id' => $materialsTaskId,
+            'budget_task_id' => $budgetTask->id,
+            'reopened' => $result['reopened'],
+        ]);
+
+        return 'budget synced'.($result['reopened'] ? ' and reopened' : '');
     }
 }

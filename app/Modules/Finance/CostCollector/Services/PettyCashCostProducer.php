@@ -49,6 +49,7 @@ class PettyCashCostProducer
             'skipped_no_job' => 0, 'skipped_unmatched' => 0, 'skipped_inactive' => 0,
             'skipped_supplier_settlement' => 0, 'skipped_voucher_settlement' => 0,
             'skipped_requisition_advance' => 0,
+            'skipped_cost_capture_settlement' => 0,
         ];
 
         foreach (Payment::query()->orderBy('id')->cursor() as $disbursement) {
@@ -67,6 +68,16 @@ class PettyCashCostProducer
         // cost that was explicitly undone.
         if ($disbursement->status !== 'active' || $disbursement->is_archived) {
             return 'skipped_inactive';
+        }
+
+        // The settlement of a company-paid cost (Report 76 P0-9). The cost
+        // line it names as its source document already is the project's actual
+        // cost and already carries the one journal, Dr expense / Cr this
+        // payment's account. Costing the payment as well — or posting it as a
+        // direct payment when it has no job — would recognise the same spend a
+        // second time. Read from the source link, never from the description.
+        if ($disbursement->source_document_type === CostLine::class) {
+            return 'skipped_cost_capture_settlement';
         }
 
         // The transfer charge, before any of the attribution below.

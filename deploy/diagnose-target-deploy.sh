@@ -35,6 +35,18 @@ php artisan migration:target-readiness 2>&1 | tail -30
 echo "== Queue cron"
 crontab -l 2>/dev/null | grep -E 'queue:work|schedule:run' || echo "no queue/scheduler cron in this user's crontab (check the hosting panel)"
 
+# Report 76A-0. Everything below only reads. It starts no worker, restarts none,
+# and neither processes, retries nor deletes a queued job.
+echo "== Queue worker (is anything draining the queue right now?)"
+pgrep -af 'artisan queue:(work|listen)' 2>/dev/null || echo "no queue:work / queue:listen process is running for this user"
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user list-units --type=service --all 2>/dev/null | grep -iE 'queue|erp' || echo "no systemd user unit for a queue worker"
+fi
+command -v supervisorctl >/dev/null 2>&1 && { supervisorctl status 2>&1 | head -10; } || echo "supervisorctl not available (no Supervisor-managed worker)"
+
+echo "== Queue contents and cost postings (read-only)"
+php artisan finance:posting-health 2>&1 | tail -40
+
 echo "== Storage link"
 ls -ld public/storage 2>&1
 

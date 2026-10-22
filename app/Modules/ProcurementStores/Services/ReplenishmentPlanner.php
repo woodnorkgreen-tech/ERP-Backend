@@ -71,17 +71,19 @@ class ReplenishmentPlanner
             return collect();
         }
 
-        $materials = LibraryMaterial::with(['stock', 'baseUom', 'purchaseUom'])
+        $materials = LibraryMaterial::with(['stock', 'baseUom', 'purchaseUom', 'uomConversions'])
             ->whereIn('id', $candidateIds)
             ->get();
 
         $incoming = $this->incomingByMaterial($candidateIds->all());
         $boardsAvailable = $this->boardsAvailableFor($materials);
-        $activeRequests = RequisitionItem::query()
+        $openItems = RequisitionItem::query()
             ->whereIn('material_id', $candidateIds)
             ->whereHas('requisition', fn ($query) => $query->whereIn('status', ['draft', 'pending_approval', 'approved']))
             ->with('requisition:id,requisition_number,status')
-            ->get()
+            ->withCount('purchaseOrderItems')
+            ->get();
+        $activeRequests = $openItems
             ->groupBy('material_id')
             ->map(fn (Collection $items) => $items->groupBy('requisition_id')->map(fn (Collection $lines) => [
                 'id' => $lines->first()->requisition_id,
@@ -90,7 +92,21 @@ class ReplenishmentPlanner
                 'quantity' => (float) $lines->sum('quantity'),
             ])->values()->all());
 
-        return $materials->map(function (LibraryMaterial $material) use ($demandByMaterial, $demandLines, $incoming, $boardsAvailable, $activeRequests) {
+        /*
+         * Report 78C: a requested-but-not-yet-ordered quantity is already on its
+         * way to becoming stock. It used to be shown to the buyer as context and
+         * then suggested again anyway, so reopening a job (or simply looking
+         * twice) could raise the same purchase twice. A line already on a
+         * purchase order is counted once, as `incoming`, and is left out here.
+         */
+        $requestedOpen = $openItems
+            ->filter(fn (RequisitionItem $item) => (int) $item->purchase_order_items_count === 0)
+            ->groupBy('material_id')
+            ->map(fn (Collection $items, $materialId) => (float) $items->sum(
+                fn (RequisitionItem $item) => $this->requestedInBase($materials->firstWhere('id', (int) $materialId), $item),
+            ));
+
+        return $materials->map(function (LibraryMaterial $material) use ($demandByMaterial, $demandLines, $incoming, $boardsAvailable, $activeRequests, $requestedOpen) {
             $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
 
             // A board-tracked material's truth is the count of physical boards
@@ -106,7 +122,9 @@ class ReplenishmentPlanner
             $incomingQuantity = (float) ($incoming[$material->id] ?? 0);
             $minimum = (float) ($material->stock?->min_stock_level ?? 0);
 
-            $projected = $free + $incomingQuantity - $demand;
+            $requested = (float) ($requestedOpen[$material->id] ?? 0);
+
+            $projected = $free + $incomingQuantity + $requested - $demand;
             $suggested = max(0.0, $minimum - $projected);
 
             if ($suggested <= 0) {
@@ -122,6 +140,7 @@ class ReplenishmentPlanner
                 'reserved' => round($reserved, 4),
                 'pending_demand' => round($demand, 4),
                 'incoming' => round($incomingQuantity, 4),
+                'requested_open' => round($requested, 4),
                 'free_stock' => round($free, 4),
                 'min_stock_level' => round($minimum, 4),
                 'projected_position' => round($projected, 4),
@@ -144,6 +163,25 @@ class ReplenishmentPlanner
     }
 
     /**
+     * An open requisition line in the material's stock unit. Requisitions are
+     * raised in the buying unit; one whose unit has no conversion to stock is
+     * not guessed at — it stays visible as context and is not subtracted.
+     */
+    private function requestedInBase(?LibraryMaterial $material, RequisitionItem $item): float
+    {
+        $quantity = (float) $item->quantity;
+        if (! $material || ! $item->uom_id || ! $material->base_uom_id || (int) $item->uom_id === (int) $material->base_uom_id) {
+            return $quantity;
+        }
+
+        $factor = (float) ($material->uomConversions->first(
+            fn ($row) => (int) $row->from_uom_id === (int) $item->uom_id && (int) $row->to_uom_id === (int) $material->base_uom_id,
+        )?->factor ?? 0);
+
+        return $factor > 0 ? $quantity * $factor : 0.0;
+    }
+
+    /**
      * Printing shortages explicitly escalated by Stores.
      *
      * Requests are stored in metres while inventory planning is in the
@@ -153,7 +191,7 @@ class ReplenishmentPlanner
      */
     private function printingDemandLines(): Collection
     {
-        return PrintMaterialRequest::query()
+        $requests = PrintMaterialRequest::query()
             ->whereNotNull('purchase_requested_at')
             ->whereIn('status', ['awaiting_purchase', 'partially_fulfilled'])
             ->with([
@@ -161,8 +199,24 @@ class ReplenishmentPlanner
                 'printJob.project.enquiry',
             ])
             ->withSum('fulfilments', 'issued_quantity_m')
-            ->get()
-            ->map(function (PrintMaterialRequest $request) {
+            ->get();
+
+        // Report 78C: a print request for a job is that job's demand, so it
+        // follows the same lifecycle rule — a completed, cancelled or on-hold
+        // job raises no new buying. Print work with no project is unaffected.
+        $jobOf = fn (PrintMaterialRequest $request) => $request->project_enquiry_id ?: $request->printJob?->project?->enquiry_id;
+        $jobEnquiries = $requests->map($jobOf)
+            ->filter()->unique()->values()->all();
+        $eligible = $jobEnquiries === [] ? collect() : app(ProjectMaterialWorkflowEligibility::class)
+            ->eligibleEnquiryIds(ProjectMaterialWorkflowEligibility::CAP_DEMAND, $jobEnquiries);
+
+        return $requests
+            ->map(function (PrintMaterialRequest $request) use ($eligible, $jobOf) {
+                $enquiryId = $jobOf($request);
+                if ($enquiryId && ! $eligible->contains((int) $enquiryId)) {
+                    return null;
+                }
+
                 $remainingMetres = max(
                     0.0,
                     (float) $request->requested_quantity_m - (float) ($request->fulfilments_sum_issued_quantity_m ?? 0),

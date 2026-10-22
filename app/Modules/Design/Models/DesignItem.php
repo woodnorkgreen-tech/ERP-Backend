@@ -46,6 +46,11 @@ class DesignItem extends Model
         'print_notes',
         'concept_notes',
         'technical_notes',
+        'outsourced_partner_name',
+        'outsourced_reason',
+        'outsourced_reason_note',
+        'outsourced_by',
+        'outsourced_at',
         'submitted_at',
         'approved_at',
         'print_ready_at',
@@ -68,7 +73,13 @@ class DesignItem extends Model
         'print_ready_at' => 'datetime',
         'production_ready_at' => 'datetime',
         'redesign_requested_at' => 'datetime',
+        'outsourced_at' => 'datetime',
     ];
+
+    public function isOutsourced(): bool
+    {
+        return $this->outsourced_partner_name !== null;
+    }
 
     public function job(): BelongsTo
     {

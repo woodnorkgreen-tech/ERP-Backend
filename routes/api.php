@@ -387,7 +387,13 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->get()
             ->keyBy(fn ($materials) => $materials->task?->project_enquiry_id);
 
-        $projects->each(function ($project) use ($materialsByEnquiry) {
+        // Report 78C: the lifecycle verdict the Desk tabs and badges follow —
+        // enquiry status + hold + legacy, never the stale projects.status mirror.
+        $lifecycles = app(\App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::class)
+            ->describeMany($projects->pluck('enquiry_id'));
+
+        $projects->each(function ($project) use ($materialsByEnquiry, $lifecycles) {
+            $project->setAttribute('lifecycle', $lifecycles[$project->enquiry_id] ?? null);
             $materials = $materialsByEnquiry->get($project->enquiry_id);
             $approval = data_get($materials?->project_info, 'approval_status', []);
             $provided = $materials !== null && (int) $materials->elements_count > 0;
@@ -884,6 +890,8 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::delete('enquiries/{enquiry}', [EnquiryController::class, 'destroy']);
         Route::put('enquiries/{enquiry}/phases/{phase}', [EnquiryController::class, 'updatePhase']);
         Route::put('enquiries/{enquiry}/deliverables', [EnquiryController::class, 'updateDeliverables']);
+        // Move a job between the External (client) and Internal pipelines; governed.
+        Route::post('enquiries/{enquiry}/pipeline', [EnquiryController::class, 'changePipeline']);
         Route::post('enquiries/{enquiry}/approve-quote', [EnquiryController::class, 'approveQuote'])
             ->middleware('quote.access');
         Route::get('enquiries/{enquiry}/workflow-state', [EnquiryController::class, 'workflowState']);
@@ -931,6 +939,16 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::post('enquiries/{enquiry}/complete', [EnquiryController::class, 'completeProject']);
         Route::get('enquiries/{enquiry}/closure-readiness', [EnquiryController::class, 'closureReadiness']);
         Route::post('enquiries/{enquiry}/close', [EnquiryController::class, 'closeProject']);
+        // Report 78C: governed lifecycle moves (D-2, D-6) and a job's lifecycle record.
+        Route::get('enquiries/{enquiry}/lifecycle', [\App\Modules\Projects\Http\Controllers\ProjectLifecycleController::class, 'show']);
+        Route::post('enquiries/{enquiry}/cancel', [\App\Modules\Projects\Http\Controllers\ProjectLifecycleController::class, 'cancel'])
+            ->middleware('permission:' . Permissions::PROJECT_LIFECYCLE_GOVERN);
+        Route::post('enquiries/{enquiry}/reactivate', [\App\Modules\Projects\Http\Controllers\ProjectLifecycleController::class, 'reactivate'])
+            ->middleware('permission:' . Permissions::PROJECT_LIFECYCLE_GOVERN);
+        Route::post('enquiries/{enquiry}/hold', [\App\Modules\Projects\Http\Controllers\ProjectLifecycleController::class, 'placeHold'])
+            ->middleware('permission:' . Permissions::PROJECT_HOLD_MANAGE);
+        Route::post('enquiries/{enquiry}/hold/release', [\App\Modules\Projects\Http\Controllers\ProjectLifecycleController::class, 'releaseHold'])
+            ->middleware('permission:' . Permissions::PROJECT_HOLD_MANAGE);
 
         // Available project officers for enquiry assignment
         Route::get('available-project-officers', function () {
@@ -1100,6 +1118,12 @@ Route::middleware(['auth:sanctum', 'active'])->group(function () {
             ->middleware('permission:' . Permissions::FINANCE_PAYMENT_SOURCES_MANAGE);
         Route::post('payments/{payment}/reverse', [\App\Modules\Finance\Controllers\PaymentController::class, 'reverse'])
             ->middleware('permission:' . Permissions::FINANCE_PAYMENTS_REVERSE);
+
+        // Report 76A: cost postings (commitments, accruals, payment costs and
+        // their reversals, budget lines) that did not reach the books, and the
+        // retry. Permissions are checked in the controller.
+        Route::get('postings', [\App\Modules\Finance\Controllers\FinanceEventPostingController::class, 'index']);
+        Route::post('postings/{posting}/retry', [\App\Modules\Finance\Controllers\FinanceEventPostingController::class, 'retry']);
 
         // Statement-based bank, mobile-money, card, and petty-cash reconciliation.
         Route::prefix('reconciliation')->group(function () {

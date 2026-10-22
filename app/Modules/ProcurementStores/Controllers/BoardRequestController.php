@@ -67,7 +67,19 @@ class BoardRequestController extends Controller
             'recipient_name' => 'nullable|string|max:255',
             'qty' => 'required|integer|min:1|max:200',
             'notes' => 'nullable|string|max:500',
+            'lifecycle_override_reason' => 'nullable|string|max:1000',
         ]);
+
+        // Report 78C: a board request reserves stock for a job, so the job must
+        // be one Stores may issue to — the same rule as every other issue.
+        $lifecycleOverride = null;
+        if ($request->filled('project_id')) {
+            $lifecycleOverride = app(\App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::class)->assertAllows(
+                (int) Project::whereKey($request->project_id)->value('enquiry_id') ?: null,
+                \App\Modules\ProcurementStores\Services\ProjectMaterialWorkflowEligibility::CAP_ISSUE,
+                $request->input('lifecycle_override_reason'),
+            );
+        }
 
         $material = LibraryMaterial::with('materialCategory.parent')->findOrFail($request->material_id);
         if (! $material->isBoardTrackable()) {
@@ -108,7 +120,14 @@ class BoardRequestController extends Controller
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
                 - (float) InventoryLog::where('project_material_id', $planned->id)
                     ->fulfilmentReopeningReturns()->sum('quantity');
-            if ((float) $request->qty > max(0, (float) $planned->quantity - $alreadyIssued)) {
+            // Report 78B: boards are counted in the material's stock unit, so the
+            // requirement is read in it too (12 sqm is not 12 boards).
+            $requiredBase = (float) app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)
+                ->requiredInBaseOrFail($planned, $material, 'qty');
+            // Report 78C: quantity recorded as fulfilled outside the ERP is not owed.
+            $retirements = app(\App\Modules\ProcurementStores\Services\MaterialRequirementRetirements::class);
+            $alreadyIssued += $retirements->retiredIn($planned, $requiredBase, (float) ($retirements->retiredBomByLine([$planned->id])[$planned->id] ?? 0));
+            if ((float) $request->qty > max(0, $requiredBase - $alreadyIssued)) {
                 return response()->json(['message' => 'Board quantity exceeds the remaining project requirement.'], 422);
             }
         }
@@ -165,7 +184,7 @@ class BoardRequestController extends Controller
                 'recipient_name' => $request->recipient_name,
                 'status' => 'pending',
                 'requested_by' => auth()->id(),
-                'notes' => $request->notes,
+                'notes' => trim($request->notes.($lifecycleOverride ? ' [Lifecycle override: '.$lifecycleOverride['reason'].']' : '')) ?: null,
             ]);
 
             // Soft-reserve in stocks

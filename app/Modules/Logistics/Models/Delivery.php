@@ -74,6 +74,7 @@ class Delivery extends Model
         }
         return TripRequest::whereIn('id', $ids)
             ->where('transport_arrangement', '!=', 'client')
+            ->where('trip_kind', '!=', 'collection')
             ->whereNotNull('loading_start_by')
             ->whereNull('loading_ended_at')
             ->get(['id', 'request_code']);

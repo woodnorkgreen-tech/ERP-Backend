@@ -217,18 +217,37 @@ class CostLine extends Model
      */
     public const GRN_ACCRUAL_SOURCE = \App\Modules\ProcurementStores\Models\GoodsReceiptNoteItem::class;
 
+    /**
+     * The two cost lines a goods receipt can raise, both owed to the supplier
+     * until its bill clears them:
+     *
+     *   accrual         stocked goods — Dr Inventory / Cr Accrued Expenses.
+     *                   Not yet anybody's cost; the Stores issue is.
+     *   receipt-actual  a non-stock purchase (a service, an outsourced job,
+     *                   goods used directly) — Dr WIP or expense / Cr Accrued
+     *                   Expenses. The receipt IS the cost (Report 76A Part 2,
+     *                   Decision B); nothing later may add a second one.
+     */
+    public const RECEIPT_LIABILITY_REFS = ['accrual', 'receipt-actual'];
+
     public function isGrnAccrual(): bool
     {
-        return $this->source_type === self::GRN_ACCRUAL_SOURCE && $this->source_ref === 'accrual';
+        return $this->source_type === self::GRN_ACCRUAL_SOURCE
+            && in_array($this->source_ref, self::RECEIPT_LIABILITY_REFS, true);
     }
 
-    /** Excludes goods-received accruals; see isGrnAccrual(). */
+    public function isReceiptActual(): bool
+    {
+        return $this->source_type === self::GRN_ACCRUAL_SOURCE && $this->source_ref === 'receipt-actual';
+    }
+
+    /** Excludes goods-receipt liabilities; see isGrnAccrual(). */
     public function scopeNotGrnAccrual($query)
     {
         return $query->where(fn ($q) => $q->whereNull('source_type')
             ->orWhere('source_type', '!=', self::GRN_ACCRUAL_SOURCE)
             ->orWhereNull('source_ref')
-            ->orWhere('source_ref', '!=', 'accrual'));
+            ->orWhereNotIn('source_ref', self::RECEIPT_LIABILITY_REFS));
     }
 
     public function scopeWithReferenceNames($query)

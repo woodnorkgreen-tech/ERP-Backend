@@ -81,6 +81,22 @@ class ExpenseCode extends Model
      * subcontractors, utilities, venue hire, statutory cover, urgent
      * overheads — one line, one classification, no items to receipt.
      */
+    /**
+     * The family whose purchases are Stores inventory.
+     *
+     * Already the line scopeForDirectBill() draws ("a real materials purchase
+     * belongs on a purchase order"), named here so the goods receipt can ask
+     * the same question: a purchase in any other family — a service, a
+     * subcontract, transport, an overhead — is not stock and must never be
+     * debited to Inventory (Report 76A Part 2, Decision B).
+     */
+    public const FAMILY_STOCK_MATERIALS = 'Direct materials';
+
+    public function isStockMaterial(): bool
+    {
+        return $this->expense_family === self::FAMILY_STOCK_MATERIALS;
+    }
+
     public function scopeForDirectBill($query)
     {
         return $query->procurable()->where('expense_family', '!=', 'Direct materials');

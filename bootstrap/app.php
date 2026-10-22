@@ -11,6 +11,15 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Every listener in app/Listeners is registered explicitly in
+    // App\Providers\EventServiceProvider. Left on, the framework's own event
+    // discovery scans that same directory and registers each of them a second
+    // time (`event:list` showed every one twice, as `Listener` and
+    // `Listener@handle`), so each event ran its listeners twice. While they
+    // were queued and idempotent that was invisible; it meant two jobs per
+    // event, two notifications per board request, and — now that cost postings
+    // run in the request (Report 76A) — every posting attempted twice.
+    ->withEvents(discover: false)
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'verified' => \App\Http\Middleware\EnsureEmailIsVerified::class,

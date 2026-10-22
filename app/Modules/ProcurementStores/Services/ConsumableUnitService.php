@@ -116,7 +116,7 @@ class ConsumableUnitService
             $stock->save();
             $log = $this->log($material, $stock, $type, $delta, $unit->unit_cost, $value, array_merge($meta, ['consumable_unit_id' => $unit->id]));
             $this->history($unit, $type, $delta, $before, $next, $value, $meta, $log);
-            if ($type === 'check_out' && ($log->project_id || $log->reference_no)) StockIssued::dispatch($log);
+            if ($type === 'check_out' && ! $log->isNonProjectReduction() && ($log->project_id || $log->reference_no)) StockIssued::dispatch($log);
             if ($type === 'return') StockReturned::dispatch($log);
             return $log;
         });
@@ -206,6 +206,7 @@ class ConsumableUnitService
             'batch_number' => $meta['batch_number'] ?? app(InventoryService::class)->generateBatchNumber(),
             'project_id' => $meta['project_id'] ?? null, 'project_material_id' => $meta['project_material_id'] ?? null,
             'original_issue_log_id' => $meta['original_issue_log_id'] ?? null, 'reversal_of_log_id' => $meta['reversal_of_log_id'] ?? null,
+            'movement_reason' => $meta['movement_reason'] ?? null, 'cost_centre_id' => $meta['cost_centre_id'] ?? null,
             'return_kind' => $type === 'return' ? ($meta['return_kind'] ?? 'whole_item') : null,
             'supplier_id' => $meta['supplier_id'] ?? null, 'reference_no' => $meta['reference_no'] ?? null,
             'recipient_name' => $meta['recipient_name'] ?? null, 'notes' => $meta['notes'] ?? null,

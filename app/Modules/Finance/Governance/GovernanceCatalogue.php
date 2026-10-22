@@ -187,7 +187,35 @@ final class GovernanceCatalogue
                 // Deliberately no suggestion: the profile's default is not put in front of the accountant as the answer.
             ]);
 
-        return ['policy.wip' => $wip] + $this->requisitionAdvanceControl();
+        return ['policy.wip' => $wip] + $this->requisitionAdvanceControl() + $this->governedPostingAccounts();
+    }
+
+    /**
+     * Report 76A Part 2: accounts only an approved decision may supply.
+     *
+     * Purchase-price variance, stock used by the company, damage and waste have
+     * no reference account and are given no suggestion. They are not required
+     * for the installation to be "ready": each is needed only when its kind of
+     * transaction first occurs, and that transaction is refused — naming this
+     * item — until the account is approved and active.
+     */
+    private function governedPostingAccounts(): array
+    {
+        $items = [];
+        foreach (\App\Modules\Finance\Support\GovernedPostingAccount::FUNCTIONS as $function => $definition) {
+            [$title, $question, $affects] = $definition;
+            [$category, $normalBalance] = \App\Modules\Finance\Support\GovernedPostingAccount::expected($function);
+            $key = \App\Modules\Finance\Support\GovernedPostingAccount::item($function);
+            $items[$key] = $this->base($key, 'policies', 'account', 'accountant_approval', $title, $question, $affects, [
+                'why' => 'No account is assumed for this. Until one is approved and active, the transactions that need it are refused with "Accounting configuration required" rather than posted somewhere convenient.',
+                'applies' => 'runtime',
+                'required' => false,
+                'expected' => ['category' => $category, 'normal_balance' => $normalBalance, 'account_type' => null],
+                'posting_function' => $function,
+            ]);
+        }
+
+        return $items;
     }
 
     /**

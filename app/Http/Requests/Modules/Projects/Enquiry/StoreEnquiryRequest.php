@@ -38,6 +38,8 @@ class StoreEnquiryRequest extends FormRequest
             // Workflow fields — these determine internal vs external pipeline
             'selected_workflow_tasks' => 'nullable|array',
             'workflow_preset_type'    => 'nullable|string',
+            // The pipeline the form was opened on (New Internal Job vs New Request).
+            'is_non_profit'           => 'sometimes|boolean',
         ];
     }
 }

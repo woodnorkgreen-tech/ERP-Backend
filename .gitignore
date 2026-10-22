@@ -32,3 +32,7 @@ graphify-out/
 /Modules/
 .env.example
 laravel_backup.sql
+
+
+# AI docs and reference files
+/docs

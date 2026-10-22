@@ -160,6 +160,9 @@ class PayablesWorkspaceTest extends TestCase
             'ordered_quantity' => 10, 'received_quantity' => $quantity, 'condition' => 'good', 'accepted' => true,
             'store_status' => 'confirmed', 'stock_status' => 'posted', 'unit_price' => 5000,
         ]);
+        // The receipt reaches the ledger as it does in the application: its accrual
+        // is what a supplier invoice later clears (Report 76A-3).
+        event(new \App\Events\GoodsReceiptRecorded($note->id));
 
         return $order;
     }

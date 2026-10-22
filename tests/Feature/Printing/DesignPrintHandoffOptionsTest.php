@@ -10,10 +10,13 @@ use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Printing\Services\PrintIntakeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Role;
+use Tests\Concerns\GrantsMatrixPermissions;
 use Tests\TestCase;
 
 class DesignPrintHandoffOptionsTest extends TestCase
 {
+    use GrantsMatrixPermissions;
     use RefreshDatabase;
 
     public function test_custom_choices_are_reusable_and_handoff_prefills_printing(): void
@@ -58,6 +61,12 @@ class DesignPrintHandoffOptionsTest extends TestCase
 
         $this->assertSame('Powder-coated frame', $printJob->application_surface);
         $this->assertEquals(0.125, $printJob->bleed_per_side_m);
+
+        $printer = User::factory()->create(['is_active' => true]);
+        $this->grantMatrixPermissions('Printing');
+        $printer->assignRole(Role::findOrCreate('Printing', 'web'));
+        Sanctum::actingAs($printer);
+
         $this->getJson("/api/printing/jobs/{$printJob->id}")->assertOk()
             ->assertJsonPath('data.application_surface', 'Powder-coated frame')
             ->assertJsonPath('data.bleed_per_side_m', 0.125);

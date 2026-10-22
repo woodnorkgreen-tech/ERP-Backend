@@ -211,12 +211,16 @@ class PurchaseOrderController extends Controller
                     'description' => $request->description,
                     'status' => 'pending',
                     'user_id' => auth()->id(),
+                    // Report 76A-3: a requisition is priced net of VAT, and so is its order.
+                    'price_basis' => \App\Modules\ProcurementStores\Services\PurchasePriceBasis::NET,
                 ]);
 
                 $totalAmount = 0;
                 foreach ($items as $item) {
                     $unitPrice = (float) ($item->unit_price ?: ($item->material?->unit_cost ?? 0));
-                    $total = $item->quantity * $unitPrice;
+                    $priced = app(\App\Modules\ProcurementStores\Services\PurchasePriceBasis::class)
+                        ->normalise(['quantity' => $item->quantity, 'unit_price' => $unitPrice], (int) $supplierId);
+                    $total = (float) $priced['total'];
 
                     $purchaseOrder->items()->create([
                         'material_id'          => $item->material_id,
@@ -224,9 +228,7 @@ class PurchaseOrderController extends Controller
                         'custom_description'   => $item->custom_description,
                         'quantity'             => $item->quantity,
                         'uom_id'               => $item->uom_id ?: ($item->material?->purchase_uom_id ?: $item->material?->base_uom_id),
-                        'unit_price'           => $unitPrice,
-                        'total'                => $total,
-                    ]);
+                    ] + $priced);
 
                     $totalAmount += $total;
                 }
@@ -283,10 +285,23 @@ class PurchaseOrderController extends Controller
             'items.*.material_id' => 'required|exists:library_materials,id',
             'items.*.quantity' => 'required|numeric|gt:0',
             'items.*.unit_price' => 'required|numeric|min:0',
+            // Report 76A-3: a quote may include tax; the order is held net.
+            'items.*.price_includes_tax' => 'nullable|boolean',
+            'items.*.vat_treatment_id' => 'nullable|exists:vat_treatments,id',
         ]);
 
         if ($validator->fails()) {
             return response(['error' => $validator->errors()], 422);
+        }
+
+        try {
+            // Every line normalised to its net price before anything is saved.
+            $basis = app(\App\Modules\ProcurementStores\Services\PurchasePriceBasis::class);
+            foreach ($input['items'] as $index => $item) {
+                $input['items'][$index] = array_merge($item, $basis->normalise($item, (int) $input['supplier_id'], "items.{$index}"));
+            }
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            return response(['error' => $exception->errors()], 422);
         }
 
         try {
@@ -295,13 +310,10 @@ class PurchaseOrderController extends Controller
             $input['po_number'] = PurchaseOrder::generatePONumber();
             $input['user_id'] = auth()->id();
             $input['status'] = 'pending'; // Always start as pending
+            $input['price_basis'] = \App\Modules\ProcurementStores\Services\PurchasePriceBasis::NET;
 
-            // Calculate total
-            $totalAmount = 0;
-            foreach ($input['items'] as $item) {
-                $totalAmount += $item['quantity'] * $item['unit_price'];
-            }
-            $input['total_amount'] = $totalAmount;
+            // The order's value is the sum of its NET lines.
+            $input['total_amount'] = array_reduce($input['items'], fn ($sum, $item) => bcadd($sum, (string) $item['total'], 2), '0.00');
 
             $items = $input['items'];
             unset($input['items']);
@@ -310,7 +322,6 @@ class PurchaseOrderController extends Controller
 
             foreach ($items as $item) {
                 $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null, $item['requisition_item_id'] ?? null);
-                $item['total'] = $item['quantity'] * $item['unit_price'];
                 $purchaseOrder->items()->create($item);
             }
 
@@ -425,10 +436,19 @@ class PurchaseOrderController extends Controller
 
                 $purchaseOrder->items()->delete();
 
+                // Report 76A-3: an order already on the net basis stays on it,
+                // line by line. An order that predates the rule is saved as it
+                // always was — its prices are not reinterpreted by an edit.
+                $netBasis = $purchaseOrder->price_basis === \App\Modules\ProcurementStores\Services\PurchasePriceBasis::NET;
                 $totalAmount = 0;
-                foreach ($items as $item) {
+                foreach ($items as $index => $item) {
                     $item['uom_id'] = $this->buyingUomId($item['material_id'] ?? null, $item['requisition_item_id'] ?? null);
-                    $item['total'] = $item['quantity'] * $item['unit_price'];
+                    if ($netBasis) {
+                        $item = array_merge($item, app(\App\Modules\ProcurementStores\Services\PurchasePriceBasis::class)
+                            ->normalise($item, (int) ($input['supplier_id'] ?? $purchaseOrder->supplier_id), "items.{$index}"));
+                    } else {
+                        $item['total'] = $item['quantity'] * $item['unit_price'];
+                    }
                     $totalAmount += $item['total'];
                     $purchaseOrder->items()->create($item);
                 }

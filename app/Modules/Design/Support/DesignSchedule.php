@@ -20,14 +20,20 @@ class DesignSchedule
 
     public static function overdueJobs(Builder $query): Builder
     {
-        return $query->whereNotIn('status', self::CLOSED_JOBS)
-            ->where(ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id'), '<', now('Africa/Nairobi')->toDateString());
+        return ProjectSetupSchedule::filterDateScope(
+            $query->whereNotIn('status', self::CLOSED_JOBS),
+            ProjectSetupSchedule::dateQuery('design_jobs.project_enquiry_id', 'design_jobs.project_id'),
+            'overdue'
+        );
     }
 
     public static function overdueItems(Builder $query): Builder
     {
-        return $query->whereNotIn('status', self::CLOSED_ITEMS)
-            ->whereHas('job', fn ($job) => $job->whereNotIn('status', self::CLOSED_JOBS))
-            ->where(self::itemDateQuery(), '<', now('Africa/Nairobi')->toDateString());
+        return ProjectSetupSchedule::filterDateScope(
+            $query->whereNotIn('status', self::CLOSED_ITEMS)
+                ->whereHas('job', fn ($job) => $job->whereNotIn('status', self::CLOSED_JOBS)),
+            self::itemDateQuery(),
+            'overdue'
+        );
     }
 }

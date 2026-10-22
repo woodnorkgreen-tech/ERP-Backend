@@ -43,7 +43,14 @@ class PurchaseOrderWorkflow
      */
     private function acceptedQuantity($receiptItem): string
     {
-        if (! $receiptItem->accepted || $receiptItem->store_status !== 'confirmed') {
+        // A reversed receipt received nothing (Report 76A Part 2).
+        if (! $receiptItem->accepted || $receiptItem->reversed_at) {
+            return '0.000000';
+        }
+        // A purchase that is not a Stores item is confirmed by its own receipt
+        // (GoodsReceiptNoteController::store sets store_status), so it arrives
+        // here already `confirmed` and needs no special case.
+        if ($receiptItem->store_status !== 'confirmed') {
             return '0.000000';
         }
         if (str_starts_with((string) $receiptItem->stock_status, 'awaiting')) {
@@ -69,6 +76,9 @@ class PurchaseOrderWorkflow
             $awaiting = false;
 
             foreach ($item->goodsReceiptNoteItems as $receiptItem) {
+                if ($receiptItem->reversed_at) {
+                    continue;
+                }
                 $received = bcadd($received, (string) $receiptItem->received_quantity, 6);
                 $accepted = bcadd($accepted, $this->acceptedQuantity($receiptItem), 6);
                 if ($receiptItem->store_status !== 'confirmed' || str_starts_with((string) $receiptItem->stock_status, 'awaiting')) {
@@ -139,6 +149,7 @@ class PurchaseOrderWorkflow
             'stages' => self::STAGES,
             'owner' => self::STAGE_GUIDE[$stage][0],
             'next_action' => self::STAGE_GUIDE[$stage][1],
+            ...$this->position($order, $acceptedValue, $anyAccepted, $receiptComplete, $validBills),
             'order_id' => $order->id,
             'order_number' => $order->po_number,
             'order_approved' => $approved,
@@ -164,6 +175,151 @@ class PurchaseOrderWorkflow
             'bills_paid_count' => $validBills->filter(fn (Bill $b) => bccomp((string) $b->balance, '0.00', 2) <= 0)->count(),
             'total_billed' => $order->totalBilled(),
             'remaining_billable' => $order->remainingBillable(),
+        ];
+    }
+
+    /**
+     * Received, billed and paid as three separate answers (Report 76A Part 2 §13).
+     *
+     * The single `stage` above is a sequence, and a sequence cannot say
+     * "fully received, part billed, nothing paid". These three can, and none of
+     * them implies another: paid is not received, received is not billed,
+     * billed is not paid. `exceptions` names what does not reconcile — a price
+     * difference on an invoice, or received goods no invoice yet covers.
+     *
+     * Closure is deliberately absent: an order has no close or cancel action
+     * (Report 76 P1-2), so no status here claims one.
+     */
+    private function position(PurchaseOrder $order, string $acceptedValue, bool $anyAccepted, bool $receiptComplete, $validBills): array
+    {
+        $covered = $order->totalBilled();
+        $receiptStatus = match (true) {
+            $order->status !== 'approved' => 'not_ordered',
+            $receiptComplete => 'fully_received',
+            $anyAccepted => 'partially_received',
+            default => 'ordered',
+        };
+        $billingStatus = match (true) {
+            bccomp($covered, '0.00', 2) <= 0 => 'not_billed',
+            $receiptComplete && bccomp($covered, (string) $order->total_amount, 2) >= 0 => 'fully_billed',
+            default => 'partially_billed',
+        };
+        $payable = $validBills->reduce(fn ($sum, Bill $b) => bcadd($sum, $b->payableAmount(), 2), '0.00');
+        $outstanding = $validBills->reduce(fn ($sum, Bill $b) => bcadd($sum, number_format(max(0, (float) $b->balance), 2, '.', ''), 2), '0.00');
+        $paymentStatus = match (true) {
+            $validBills->isEmpty() || bccomp($payable, $outstanding, 2) === 0 => 'unpaid',
+            bccomp($outstanding, '0.00', 2) <= 0 => 'fully_paid',
+            default => 'partially_paid',
+        };
+
+        $variance = $validBills->reduce(fn ($sum, Bill $b) => bcadd($sum, $b->priceVariance(), 2), '0.00');
+        $uninvoiced = bcsub($acceptedValue, $covered, 2);
+        $exceptions = [];
+        if (bccomp($variance, '0.00', 2) !== 0) {
+            $exceptions[] = ['key' => 'price_variance', 'amount' => $variance,
+                'message' => 'Supplier invoices differ from the value received by '.number_format((float) $variance, 2).'.'];
+        }
+        if ($validBills->isNotEmpty() && bccomp($uninvoiced, '0.00', 2) > 0) {
+            $exceptions[] = ['key' => 'received_not_invoiced', 'amount' => $uninvoiced,
+                'message' => number_format((float) $uninvoiced, 2).' of received goods is not yet covered by a supplier invoice.'];
+        }
+
+        $credited = $validBills->reduce(fn ($sum, Bill $b) => bcadd($sum, number_format((float) ($b->credited_amount ?? 0), 2, '.', ''), 2), '0.00');
+        $paid = $validBills->reduce(fn ($sum, Bill $b) => bcadd($sum, number_format((float) $b->paid_amount, 2, '.', ''), 2), '0.00');
+        if ($paymentStatus === 'fully_paid' && bccomp($paid, '0.00', 2) <= 0 && bccomp($credited, '0.00', 2) > 0) {
+            // Cleared by the supplier's credit, not by money: not "paid".
+            $paymentStatus = 'credited';
+        }
+        $pendingVariance = $validBills->filter(fn (Bill $b) => $b->verified_at === null && bccomp($b->priceVariance(), '0.00', 2) !== 0)->count();
+        if ($pendingVariance > 0) {
+            $exceptions[] = ['key' => 'variance_pending', 'amount' => null,
+                'message' => $pendingVariance.' invoice(s) with a price difference are waiting to be verified.'];
+        }
+
+        return [
+            'credited_value' => $credited,
+            'reversed_bills' => $order->bills->whereNotNull('reversed_at')->count(),
+            'variance_pending' => $pendingVariance > 0,
+            'receipt_status' => $receiptStatus,
+            'billing_status' => $billingStatus,
+            'payment_status' => $paymentStatus,
+            'received_value' => $acceptedValue,
+            'billed_receipt_value' => $covered,
+            'received_not_invoiced' => bccomp($uninvoiced, '0.00', 2) > 0 ? $uninvoiced : '0.00',
+            'price_variance' => $variance,
+            'has_exception' => $exceptions !== [],
+            'exceptions' => $exceptions,
+        ];
+    }
+
+    /** Accrued receipt value on an order that no other live invoice has taken. */
+    private function uninvoicedAccrual(PurchaseOrder $order, int $excludingBillId): string
+    {
+        $matching = app(BillMatchingService::class);
+        $total = '0.00';
+        foreach ($order->items as $item) {
+            foreach ($item->goodsReceiptNoteItems as $receipt) {
+                $total = bcadd($total, $matching->outstanding($receipt, $excludingBillId)['value'], 2);
+            }
+        }
+
+        return $total;
+    }
+
+    /** Who resolves a failed check and how (Report 76A-3 §7). */
+    private const CHECK_GUIDE = [
+        'order' => ['owner' => 'Procurement', 'action' => 'Get the purchase order approved.'],
+        'supplier' => ['owner' => 'Accounts', 'action' => 'Record the invoice against the order of the supplier who issued it.'],
+        'reference' => ['owner' => 'Accounts', 'action' => 'Enter the supplier\'s invoice number.'],
+        'receipt' => ['owner' => 'Stores', 'action' => 'Receive and confirm the goods on a goods receipt note.'],
+        'accepted_value' => ['owner' => 'Stores', 'action' => 'Receive the remaining goods, or have the supplier correct the invoice.'],
+        'order_total' => ['owner' => 'Procurement', 'action' => 'Amend the order, or have the supplier correct the invoice.'],
+        'line_match' => ['owner' => 'Stores', 'action' => 'Receive the goods the unmatched line is for, or correct its quantity.'],
+        'price_variance' => ['owner' => 'Finance', 'action' => 'Explain the difference on the line; if an account is required, approve one in Finance Setup > Accounting Policies.'],
+        'receipt_accrued' => ['owner' => 'Finance', 'action' => 'Post the receipt: Finance > Setup > System checks > Cost postings lists it with a Retry.'],
+    ];
+
+    /**
+     * A bill's position as four separate answers (Report 76A-3 §7). None
+     * implies another: verified is not paid, credited is not paid, and an
+     * invoice that reads verified with no entry behind it says so.
+     */
+    private function billStatuses(Bill $bill, bool $verified, bool $returned, bool $settled, bool $hasVariance, $checks): array
+    {
+        $posted = \App\Modules\Finance\Models\JournalEntry::where('entry_no', 'JE-BILL-'.str_pad((string) $bill->id, 7, '0', STR_PAD_LEFT))
+            ->where('status', 'posted')->exists();
+        $paid = bccomp((string) $bill->paid_amount, '0.00', 2) > 0;
+        $credited = bccomp((string) ($bill->credited_amount ?? 0), '0.00', 2) > 0;
+
+        return [
+            'document' => match (true) {
+                $bill->reversed_at !== null => 'reversed',
+                $bill->status === 'cancelled' => 'cancelled',
+                $verified => 'approved',
+                $returned => 'returned',
+                default => 'submitted',
+            },
+            'matching' => match (true) {
+                $bill->isDirect() => 'not_applicable',
+                $checks->where('key', 'line_match')->where('passed', false)->isNotEmpty(),
+                $checks->whereIn('key', ['receipt', 'accepted_value'])->where('passed', false)->isNotEmpty() => 'unmatched',
+                $checks->where('key', 'price_variance')->where('passed', false)->isNotEmpty() => 'variance_pending',
+                $hasVariance => 'matched_with_variance',
+                default => 'matched',
+            },
+            'payment' => match (true) {
+                $bill->reversed_at !== null => 'reversed',
+                $settled && ! $paid && $credited => 'credited',
+                $settled => 'paid',
+                $paid => 'partially_paid',
+                default => 'unpaid',
+            },
+            'posting' => match (true) {
+                $posted => 'posting_complete',
+                $bill->verified_at !== null && $bill->verification_basis !== 'legacy' => 'posting_failed',
+                $bill->verification_basis === 'legacy' => 'not_applicable',
+                default => 'posting_pending',
+            },
         ];
     }
 
@@ -218,8 +374,19 @@ class PurchaseOrderWorkflow
          * Invoices predating tax capture carry net = amount, so this is the
          * same comparison it always was for them.
          */
-        $amount = $bill->netAmount();
-
+        // Report 76A Part 2 (Decision A): what is matched is the value of
+        // RECEIVED goods this invoice covers, at the order's prices. For an
+        // invoice that states no price difference that is its own net value,
+        // exactly as before. Where the supplier charged more or less, the
+        // difference is a purchase-price variance, checked separately below —
+        // it is neither extra quantity billed nor a reason to fail the match.
+        $amount = $bill->receiptValueCovered();
+        $variance = $bill->priceVariance();
+        $hasVariance = bccomp($variance, '0.00', 2) !== 0;
+        $varianceAccount = \App\Modules\Finance\Support\GovernedPostingAccount::code(\App\Modules\Finance\Support\GovernedPostingAccount::PURCHASE_PRICE_VARIANCE);
+        // A difference the preparer stated needs their reason. One that arises
+        // only because the invoice's VAT cannot be recovered explains itself.
+        $varianceExplained = filled($bill->price_variance_reason) || $bill->receipt_value_covered === null;
         // W2-3: excludes this bill itself — re-verifying an existing bill
         // must not count its own amount against its own remaining balance.
         // For a persisted bill this is a real exclusion; for one not yet
@@ -295,6 +462,101 @@ class PurchaseOrderWorkflow
             ],
         ];
 
+        /*
+         * Report 76A-3 — the line-level match.
+         *
+         * An invoice with lines is matched line by line to accepted receipts;
+         * the checks above stay as the order-level backstop. What the lines add:
+         * every billed quantity names the receipt it is for, every price
+         * difference is explained, and whatever part of a difference cannot go
+         * to stock still on hand has an approved account to go to.
+         */
+        $bill->loadMissing(['lines.allocations.goodsReceiptNoteItem', 'lines.purchaseOrderItem.material', 'vatTreatment']);
+        $toVariance = $variance;
+        if ($bill->lines->isNotEmpty()) {
+            $unmatched = $bill->lines->reject(fn ($line) => $line->isFullyAllocated());
+            $checks[] = [
+                'key' => 'line_match',
+                'label' => 'Every invoice line is matched to accepted receipts',
+                'detail' => $unmatched->isEmpty()
+                    ? $bill->lines->count().' line(s) matched to the receipts they cover.'
+                    : 'Line '.$unmatched->pluck('line_no')->implode(', ').' bills more than has been accepted and not yet invoiced. '
+                        .'Receive the goods, or correct the quantity.',
+                'passed' => $unmatched->isEmpty(),
+            ];
+            $unexplained = app(BillMatchingService::class)->unexplainedLines($bill);
+            $varianceExplained = $unexplained->isEmpty();
+            $toVariance = collect(app(BillCostDifferenceService::class)->plan($bill))
+                ->reduce(fn ($sum, $part) => bcadd($sum, $part['to_variance'], 2), '0.00');
+        }
+        $needsVarianceAccount = bccomp($toVariance, '0.00', 2) !== 0;
+
+        /*
+         * An invoice clears the accrual its receipts raised — so the receipts
+         * must have raised one. A receipt whose posting failed, or that
+         * predates receipt accruals altogether, has put nothing in the ledger;
+         * clearing it anyway would relieve a liability that was never recorded
+         * and drive the accrual account the wrong way. Asked only of an
+         * invoice not yet verified: one already posted is read as it stands.
+         */
+        if ($bill->verified_at === null && bccomp($workflow['accepted_value'], '0.00', 2) > 0) {
+            $uninvoiced = $this->uninvoicedAccrual($order, (int) $bill->id);
+            $needed = $bill->lines->isNotEmpty()
+                ? number_format((float) $bill->lines->sum('receipt_value_covered'), 2, '.', '')
+                : $bill->netAmount();
+            $claims = $bill->lines->isNotEmpty() ? '0.00' : $needed;   // a line-matched bill already holds its allocations
+            $checks[] = [
+                'key' => 'receipt_accrued',
+                'label' => 'The accepted receipts have reached the ledger',
+                'detail' => bccomp($claims, $uninvoiced, 2) <= 0
+                    ? 'The receipts this invoice clears are accrued in the ledger.'
+                    : 'Only '.number_format((float) $uninvoiced, 2).' of accepted receipts on this order is accrued in the ledger and not yet invoiced, against '
+                        .number_format((float) $needed, 2).' on this invoice. A receipt whose posting failed, or that predates receipt accruals, must be posted first.',
+                'passed' => bccomp($claims, $uninvoiced, 2) <= 0,
+            ];
+        }
+
+        if ($hasVariance) {
+            $checks[] = [
+                'key' => 'price_variance',
+                'label' => match (true) {
+                    ! $varianceExplained => 'Price difference from the receipt value is explained',
+                    $needsVarianceAccount && $varianceAccount === null => 'PURCHASE PRICE VARIANCE ACCOUNT REQUIRED',
+                    default => 'Cost difference from the receipt value is explained and has somewhere to go',
+                },
+                'detail' => 'Invoice cost '.number_format((float) $bill->invoiceCostBasis(), 2).' against received value '
+                    .number_format((float) $amount, 2).': a difference of '.number_format((float) $variance, 2).'. '
+                    .($needsVarianceAccount && $varianceAccount === null
+                        ? 'Accounting configuration required — '.number_format((float) $toVariance, 2).' of it cannot be put to stock still on hand, and Finance has not approved an account for purchase price variance (Finance Setup > Accounting Policies). It is not posted to stock, the job or the supplier balance instead.'
+                        : ($bill->price_variance_reason ?: 'The invoice carries VAT that cannot be recovered.')
+                            .($bill->lines->isNotEmpty() ? ' Stock on hand takes '.number_format((float) bcsub($variance, $toVariance, 2), 2).'; the variance account takes '.number_format((float) $toVariance, 2).'.' : '')),
+                'passed' => $varianceExplained && (! $needsVarianceAccount || $varianceAccount !== null),
+            ];
+        }
+
+        /*
+         * Input VAT and the tax document behind it.
+         *
+         * Whether a supply's VAT may be claimed without an eTIMS invoice is a
+         * property of its VAT treatment (`requires_etims`), and WNG's existing
+         * rule is that such an invoice is still verified and posted, then held
+         * out of the VAT return as "at risk" until the document is supplied —
+         * the claim gate lives on the return. That rule is kept: this does not
+         * block verification. It states the position on the invoice itself so
+         * the person verifying sees it before, not after, the return is drawn.
+         */
+        $claimsVat = $bill->vatTreatment?->is_recoverable && (float) ($bill->vat_amount ?? 0) > 0;
+        $taxDocument = [
+            'claims_input_vat' => (bool) $claimsVat,
+            'requires_etims' => (bool) ($claimsVat && $bill->vatTreatment->requires_etims),
+            'supported' => ! ($claimsVat && $bill->vatTreatment->requires_etims) || filled($bill->etims_invoice_no),
+        ];
+        $taxDocument['message'] = $taxDocument['supported'] ? null
+            : 'Input VAT of '.number_format((float) $bill->vat_amount, 2).' has no eTIMS invoice number behind it. It is posted, but held out of the VAT return as at risk until the number is added.';
+
+        // Report 76A-3 §7: who acts on a failed check, and what they do.
+        $checks = array_map(fn (array $check) => $check + (self::CHECK_GUIDE[$check['key']] ?? ['owner' => 'Accounts', 'action' => null]), $checks);
+
         // Report 60 §16: a bill returned to its preparer cannot be verified
         // until they correct and resubmit it, whatever the checks say.
         $returned = $bill->awaitingCorrection();
@@ -340,6 +602,17 @@ class PurchaseOrderWorkflow
             'bill_id' => $bill->id,
             'bill_number' => $bill->bill_number,
             'bill_amount' => $amount,
+            'bill_net' => $bill->netAmount(),
+            'receipt_value_covered' => $amount,
+            'price_variance' => $variance,
+            'price_variance_reason' => $bill->price_variance_reason,
+            'price_variance_account_ready' => $varianceAccount !== null,
+            'statuses' => $this->billStatuses($bill, $verified, $returned, $settled, $hasVariance, collect($checks)),
+            'credited_amount' => (string) ($bill->credited_amount ?? 0),
+            'reversed_at' => $bill->reversed_at?->toDateTimeString(),
+            'reversal_reason' => $bill->reversal_reason,
+            'has_lines' => $bill->lines->isNotEmpty(),
+            'tax_document' => $taxDocument,
             'bill_gross' => (string) $bill->amount,
             'bill_vat' => (string) ($bill->vat_amount ?? 0),
             'bill_wht' => (string) ($bill->wht_amount ?? 0),
@@ -394,6 +667,9 @@ class PurchaseOrderWorkflow
                 (string) ($bill->net_amount ?? $bill->amount),
                 (string) ($bill->vat_amount ?? 0),
                 (string) ($bill->wht_amount ?? 0),
+                // Only when stated, so every invoice verified before a receipt
+                // value could be stated keeps the fingerprint it was signed with.
+                ...($bill->receipt_value_covered !== null ? [(string) $bill->receipt_value_covered] : []),
             ],
         ], JSON_THROW_ON_ERROR));
     }

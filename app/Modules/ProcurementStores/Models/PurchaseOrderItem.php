@@ -22,12 +22,26 @@ class PurchaseOrderItem extends Model
         'uom_id',
         'unit_price',
         'total',
+        // Report 76A-3: `unit_price` is NET of VAT; these keep the supplier's
+        // quote as given and what it normalised to. NULL on earlier lines.
+        'quoted_unit_price',
+        'quoted_price_includes_tax',
+        'vat_treatment_id',
+        'tax_rate_percent',
+        'net_amount',
+        'tax_amount',
+        'gross_amount',
     ];
 
     protected $casts = [
         'quantity' => 'decimal:6',
         'unit_price' => 'decimal:2',
         'total' => 'decimal:2',
+        'quoted_unit_price' => 'decimal:4',
+        'quoted_price_includes_tax' => 'boolean',
+        'net_amount' => 'decimal:2',
+        'tax_amount' => 'decimal:2',
+        'gross_amount' => 'decimal:2',
     ];
 
     public function purchaseOrder()
