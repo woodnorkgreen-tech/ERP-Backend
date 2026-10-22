@@ -193,6 +193,40 @@ class DraftFirstCatalogueTest extends TestCase
         $this->assertSame($codes->count(), $codes->unique()->count(), 'Each variant must get its own code.');
     }
 
+    public function test_bulk_creation_preserves_shared_controls_conversions_review_status_and_zero_price(): void
+    {
+        $box = UnitOfMeasure::firstOrCreate(
+            ['code' => 'bulkbox'],
+            ['name' => 'Bulk box', 'dimension' => 'package', 'is_active' => true],
+        );
+        $this->postJson('/api/materials-library/materials/bulk', [
+            'material_name' => 'Shared form',
+            'material_category_id' => $this->leaf->id,
+            'base_uom_id' => $this->sheet->id,
+            'purchase_uom_id' => $box->id,
+            'issue_uom_id' => $this->sheet->id,
+            'uom_conversions' => [['from_uom_id' => $box->id, 'factor' => 10]],
+            'item_status' => 'Under Review',
+            'is_hazardous' => true,
+            'is_project_chargeable' => false,
+            'default_unit_cost' => 25,
+            'variants' => [['label' => 'Standard'], ['label' => 'Free sample', 'default_unit_cost' => 0]],
+        ])->assertCreated()->assertJsonCount(2, 'created')->assertJsonCount(0, 'failed');
+
+        foreach (LibraryMaterial::where('material_name', 'like', 'Shared form - %')->get() as $material) {
+            $this->assertSame('Under Review', $material->item_status);
+            $this->assertTrue((bool) $material->is_hazardous);
+            $this->assertFalse((bool) $material->is_project_chargeable);
+            $this->assertSame($box->id, $material->purchase_uom_id);
+            $this->assertDatabaseHas('material_uom_conversions', [
+                'material_id' => $material->id, 'from_uom_id' => $box->id,
+                'to_uom_id' => $this->sheet->id, 'factor' => 10,
+            ]);
+        }
+        $this->assertEquals(0, (float) LibraryMaterial::where('material_name', 'Shared form - Free sample')->sole()->default_unit_cost);
+        $this->assertEquals(25, (float) LibraryMaterial::where('material_name', 'Shared form - Standard')->sole()->default_unit_cost);
+    }
+
     public function test_bulk_create_rejects_duplicate_labels_within_the_same_batch(): void
     {
         $this->postJson('/api/materials-library/materials/bulk', [

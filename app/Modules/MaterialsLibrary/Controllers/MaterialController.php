@@ -285,7 +285,7 @@ class MaterialController extends Controller
                 $label = trim((string) $variant['label']);
                 $data = $shared;
                 $data['material_name'] = trim($shared['material_name']).' - '.$label;
-                if (! empty($variant['default_unit_cost'])) {
+                if (isset($variant['default_unit_cost'])) {
                     $data['default_unit_cost'] = $variant['default_unit_cost'];
                 }
 
@@ -341,6 +341,37 @@ class MaterialController extends Controller
         return response()->json([
             'message' => "{$material->material_name} is now active and can be received and issued.",
             'data' => new LibraryMaterialResource($material->load('stock')),
+        ]);
+    }
+
+    /**
+     * Re-measure a material that already has stock in a different stock unit.
+     * See MaterialStockUnitChange — every stock-unit quantity is restated by
+     * the factor, history keeps what was typed, nothing is posted.
+     */
+    public function changeStockUnit(Request $request, $id, \App\Modules\MaterialsLibrary\Services\MaterialStockUnitChange $change): JsonResponse
+    {
+        $validated = $request->validate([
+            'to_uom_id' => 'required|integer|exists:units_of_measure,id',
+            'factor' => 'required|numeric|gt:0|max:1000000',
+            'reason' => 'required|string|min:5|max:500',
+        ]);
+        $material = LibraryMaterial::findOrFail($id);
+        $from = $material->unit_of_measure;
+        $result = $change->change($material, (int) $validated['to_uom_id'], (string) $validated['factor'], $validated['reason'], (int) auth()->id());
+        $to = $result['material']->unit_of_measure;
+
+        $message = "Now counted in {$to}: ".(float) $result['on_hand_before']." {$from} on hand became ".(float) $result['on_hand_after']." {$to}. History keeps what was entered, and {$from} still works for buying and project lists.";
+        if ($counts = $change->openCountsFor((int) $material->id)) {
+            $message .= ' Its line on open stock count '.implode(', ', $counts)." was restated too — count it in {$to} from now on.";
+        }
+        if (bccomp($result['value_before'], $result['value_after'], 2) !== 0) {
+            $message .= " Stock value {$result['value_before']} → {$result['value_after']} (average cost held to cents per {$to}).";
+        }
+
+        return response()->json([
+            'message' => $message,
+            'data' => new LibraryMaterialResource($result['material']->load('stock', 'materialCategory.parent')->loadExists('inventoryLogs as has_stock_movements')),
         ]);
     }
 
@@ -585,7 +616,9 @@ class MaterialController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $material = LibraryMaterial::with(['workstation', 'stock'])
+        // The same shape the list returns: the edit form saves its unit
+        // conversions back, so loading it without them reset them to 1.
+        $material = LibraryMaterial::with(['workstation', 'stock', 'materialCategory.parent', 'itemType', 'baseUom', 'purchaseUom', 'issueUom', 'uomConversions'])
             ->withExists('inventoryLogs as has_stock_movements')
             ->findOrFail($id);
         return response()->json([

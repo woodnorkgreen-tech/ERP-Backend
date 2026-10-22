@@ -59,7 +59,7 @@ class StoreMaterialRequest extends FormRequest
             'base_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'purchase_uom_id' => 'nullable|integer|exists:units_of_measure,id',
             'issue_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'uom_conversions' => 'nullable|array|max:2',
+            'uom_conversions' => 'nullable|array|max:12',
             'uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
             'uom_conversions.*.factor' => 'required|numeric|gt:0',
             // What this material is expected to cost when no delivery has

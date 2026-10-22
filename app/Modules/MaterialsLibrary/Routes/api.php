@@ -49,6 +49,7 @@ Route::middleware('permission:'.Permissions::MATERIALS_LIBRARY_MANAGE)->group(fu
     Route::post('materials/bulk', [MaterialController::class, 'bulkStore']);
     Route::post('materials/inventory-visibility', [MaterialController::class, 'inventoryVisibility']);
     Route::post('materials/{id}/activate', [MaterialController::class, 'activate']);
+    Route::post('materials/{id}/change-stock-unit', [MaterialController::class, 'changeStockUnit']);
     Route::post('materials/{id}/restore', [MaterialController::class, 'restore']);
     Route::delete('materials/{id}/force', [MaterialController::class, 'forceDelete']);
     Route::post('materials', [MaterialController::class, 'store']);
