@@ -36,7 +36,14 @@ class SalaryAdvanceRegister
         $month = fn (?string $value) => preg_match('/^\d{4}-\d{2}$/', (string) $value) ? $value : null;
         $date = fn (?string $value) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $value) ? $value : null;
 
+        // An explicitly supplied selection must never fall back to exporting all.
+        $ids = $request->has('ids') ? $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['required', 'integer', 'min:1', 'distinct'],
+        ])['ids'] : null;
+
         return array_filter([
+            'ids' => $ids === null ? null : array_map('intval', $ids),
             'status' => $stages,
             'search' => trim((string) $request->input('search', '')) ?: null,
             'department_id' => $request->integer('department_id') ?: null,
@@ -54,6 +61,9 @@ class SalaryAdvanceRegister
         $query = SalaryAdvanceRequest::query()
             ->with(['employee.department', 'ledgers', 'payment.paymentSource', 'recoveries']);
 
+        if (array_key_exists('ids', $filters)) {
+            $query->whereIn('salary_advance_requests.id', $filters['ids']);
+        }
         if (! empty($filters['status'])) {
             $query->where(function (Builder $any) use ($filters) {
                 foreach ($filters['status'] as $stage) {
