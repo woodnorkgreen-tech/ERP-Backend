@@ -5,6 +5,7 @@ namespace App\Modules\HR\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\HR\Models\Employee;
 use App\Modules\HR\Models\HRAuditLog;
+use App\Modules\HR\Models\HrSetting;
 use App\Modules\HR\Models\PayrollLedger;
 use App\Modules\HR\Models\SalaryAdvanceRequest;
 use App\Modules\HR\Models\SalaryAdvanceRecovery;
@@ -111,6 +112,9 @@ class SalaryAdvanceController extends Controller
     private function describeFilters(array $filters): array
     {
         $lines = [];
+        if (! empty($filters['ids'])) {
+            $lines[] = 'Selected applications: '.count($filters['ids']);
+        }
         if (! empty($filters['status'])) {
             $lines[] = 'Status: '.implode(', ', array_map(fn ($stage) => SalaryAdvanceRegister::STAGES[$stage], $filters['status']));
         }
@@ -137,6 +141,41 @@ class SalaryAdvanceController extends Controller
         return $lines;
     }
 
+    /** The advance cap policy. Every signed-in user may read it (the apply form shows it). */
+    public function policy(): JsonResponse
+    {
+        return response()->json(['success' => true, 'data' => HrSetting::advanceCap()]);
+    }
+
+    /** HR switches the advance cap on or off and sets its percentage. */
+    public function updatePolicy(Request $request): JsonResponse
+    {
+        abort_unless($request->user()?->can(Permissions::HR_MANAGE_PAYROLL), 403, 'Only HR can change the salary advance cap.');
+
+        $validated = $request->validate([
+            'enabled' => 'required|boolean',
+            'percent' => 'required|numeric|min:1|max:100',
+        ]);
+
+        $before = HrSetting::advanceCap();
+        DB::transaction(function () use ($validated, $request) {
+            HrSetting::put(HrSetting::ADVANCE_CAP_ENABLED, (bool) $validated['enabled'], $request->user()->id);
+            HrSetting::put(HrSetting::ADVANCE_CAP_PERCENT, $validated['percent'], $request->user()->id);
+        });
+        $after = HrSetting::advanceCap();
+
+        HRAuditLog::create([
+            'user_id' => $request->user()->id,
+            'action' => 'salary_advance_cap_updated',
+            'model_type' => 'HrSetting',
+            'message' => 'Salary advance cap ' . ($after['enabled'] ? "switched on at {$after['percent']}%" : 'switched off'),
+            'context' => ['before' => $before, 'after' => $after],
+            'ip_address' => $request->ip(),
+        ]);
+
+        return response()->json(['success' => true, 'data' => $after]);
+    }
+
     /**
      * Submit a new salary advance request (for Employee).
      */
@@ -159,12 +198,22 @@ class SalaryAdvanceController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Industry Standard Check: Cap at 50% of salary
-        $cap = ($employee->salary ?? 0) * 0.5;
-        if ($request->amount > $cap) {
-            return response()->json([
-                'message' => "Advance request exceeds the safety cap of 50% of your salary (Max: KES " . number_format($cap, 2) . ")"
-            ], 422);
+        // Salary cap: only enforced when HR has switched it on.
+        $policy = HrSetting::advanceCap();
+        if ($policy['enabled']) {
+            $percentLabel = rtrim(rtrim(number_format($policy['percent'], 2), '0'), '.');
+            $salary = (float) ($employee->salary ?? 0);
+            if ($salary <= 0) {
+                return response()->json([
+                    'message' => "Your salary is not on record, so the {$percentLabel}% advance cap cannot be checked. Please ask HR to update your salary."
+                ], 422);
+            }
+            $cap = $salary * $policy['percent'] / 100;
+            if ($request->amount > $cap) {
+                return response()->json([
+                    'message' => "Advance request exceeds the safety cap of {$percentLabel}% of your salary (Max: KES " . number_format($cap, 2) . ")"
+                ], 422);
+            }
         }
 
         $advance = SalaryAdvanceRequest::create([
