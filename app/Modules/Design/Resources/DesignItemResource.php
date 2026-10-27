@@ -65,7 +65,8 @@ class DesignItemResource extends JsonResource
             'handoffs' => DesignHandoffResource::collection($this->whenLoaded('handoffs')),
             'work_tracking' => $this->whenLoaded('workSessions', fn () => WorkTrackingSummary::from(
                 $this->workSessions,
-                in_array($this->status, ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required'], true)
+                in_array($this->status, ['done', 'print_ready', 'production_ready', 'handed_off', 'not_required'], true),
+                true
             )),
             'revisions' => DesignRevisionResource::collection($this->whenLoaded('revisions')),
             'change_requests' => DesignChangeRequestResource::collection($this->whenLoaded('changeRequests')),

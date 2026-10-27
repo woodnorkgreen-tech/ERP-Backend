@@ -18,11 +18,18 @@ class DesignWorkTrackingService
             if (in_array($item->status, self::FINISHED, true)) {
                 throw ValidationException::withMessages(['status' => ['Finished or cancelled design work cannot be started.']]);
             }
+            if ($item->job?->status === 'cancelled' || $item->job?->enquiry?->status === 'cancelled') {
+                throw ValidationException::withMessages(['status' => ['Work cannot start on a cancelled design job.']]);
+            }
             if ($item->workSessions()->whereNull('ended_at')->exists()) {
                 throw ValidationException::withMessages(['work_tracking' => ['This design item is already being worked on.']]);
             }
 
-            $item->workSessions()->create(['user_id' => auth()->id(), 'started_at' => now()]);
+            $latest = $item->revisions()->first();
+            $round = $latest ? $latest->version_number + ($latest->status === 'approved' ? 1 : 0) : 1;
+            $item->workSessions()->create([
+                'user_id' => auth()->id(), 'started_at' => now(), 'revision_round' => $round,
+            ]);
             if ($item->status === 'pending') {
                 $item->update(['status' => 'in_design', 'updated_by' => auth()->id()]);
             }
@@ -52,13 +59,36 @@ class DesignWorkTrackingService
         });
     }
 
-    public function closeForWorkflow(DesignItem $item, string $endType, ?string $reason = null): void
+    public function stop(DesignItem $item, string $outcome, ?string $reason = null): DesignItem
+    {
+        if (in_array($outcome, ['cancelled', 'rejected'], true) && blank($reason)) {
+            throw ValidationException::withMessages(['reason' => ['Give a reason for cancelled or rejected work.']]);
+        }
+
+        return DB::transaction(function () use ($item, $outcome, $reason) {
+            $item = DesignItem::query()->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $session = $item->workSessions()->whereNull('ended_at')->latest('started_at')->first();
+            if (!$session) {
+                throw ValidationException::withMessages(['work_tracking' => ['No active work session is available to stop.']]);
+            }
+            $session->update([
+                'ended_at' => now(), 'end_type' => $outcome, 'stop_reason' => $reason,
+                'ended_by' => auth()->id(),
+            ]);
+
+            return $this->fresh($item);
+        });
+    }
+
+    public function closeForWorkflow(DesignItem $item, string $endType, ?string $reason = null, ?int $endedBy = null): void
     {
         $session = $item->workSessions()->whereNull('ended_at')->latest('started_at')->first();
         if (!$session) return;
         $session->update([
-            'ended_at' => now(), 'end_type' => $endType, 'pause_reason_code' => $reason,
-            'ended_by' => auth()->id(),
+            'ended_at' => now(), 'end_type' => $endType,
+            'pause_reason_code' => $endType === 'paused' ? $reason : null,
+            'stop_reason' => $endType === 'paused' ? null : $reason,
+            'ended_by' => $endedBy ?? auth()->id(),
         ]);
     }
 

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Design\Models\DesignDocument;
 use App\Modules\Design\Models\DesignItem;
 use App\Modules\Design\Models\DesignJob;
+use App\Modules\Design\Models\DesignRevision;
 use App\Modules\Design\Models\DesignUpdate;
 use App\Modules\Design\Services\DesignHandoffService;
 use App\Modules\Printing\Models\PrintJob;
@@ -114,8 +115,17 @@ class OutsourcingFlowTest extends TestCase
             'outsourced_partner_name' => 'Studio North',
             'outsourced_reason' => 'specialist_skill',
         ]);
+        $revision = DesignRevision::create([
+            'design_item_id' => $item->id,
+            'version_number' => 1,
+            'change_summary' => 'Approved artwork',
+            'status' => 'approved',
+            'completed_at' => now(),
+            'approved_at' => now(),
+        ]);
         DesignDocument::create([
             'design_item_id' => $item->id,
+            'design_revision_id' => $revision->id,
             'document_type' => 'artwork',
             'name' => 'Approved artwork',
             'original_name' => 'Approved artwork',

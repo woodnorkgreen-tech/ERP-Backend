@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class DesignHistoryController extends Controller
 {
@@ -70,7 +71,7 @@ class DesignHistoryController extends Controller
     {
         $data = $request->validate([
             'change_summary' => ['required', 'string', 'max:5000'],
-            'artwork_url' => ['nullable', 'url', 'max:2048'],
+            'artwork_url' => [$item->stream === 'graphic' ? 'required' : 'nullable', 'url', 'max:2048'],
             'artwork_name' => ['nullable', 'string', 'max:255'],
             'addresses_change_request_ids' => ['nullable', 'array'],
             'addresses_change_request_ids.*' => [
@@ -125,11 +126,39 @@ class DesignHistoryController extends Controller
         ], 201);
     }
 
+    public function completeRevision(DesignRevision $revision): JsonResponse
+    {
+        if ($revision->status !== 'draft') {
+            throw ValidationException::withMessages(['revision' => ['Only a draft revision can be completed.']]);
+        }
+        if ($revision->item->revisions()->first()?->id !== $revision->id) {
+            throw ValidationException::withMessages(['revision' => ['Complete the latest revision.']]);
+        }
+        if ($revision->item->stream === 'graphic' && !$revision->documents()
+            ->where('status', 'active')->where('document_type', 'artwork')->where('source', 'link')->exists()) {
+            throw ValidationException::withMessages(['documents' => ['Add a print-ready artwork link to this revision first.']]);
+        }
+
+        $revision->update(['status' => 'completed', 'completed_at' => now()]);
+
+        return response()->json([
+            'message' => "Artwork version {$revision->version_number} completed",
+            'data' => new DesignRevisionResource($revision->fresh(['documents', 'creator:id,name', 'approver:id,name'])),
+        ]);
+    }
+
     public function approveRevision(Request $request, DesignRevision $revision): JsonResponse
     {
         $data = $request->validate([
             'approval_evidence' => ['required', 'string', 'max:5000'],
         ]);
+        if ($revision->status !== 'completed' || $revision->item->revisions()->first()?->id !== $revision->id) {
+            throw ValidationException::withMessages(['revision' => ['Complete the latest revision before approving it.']]);
+        }
+        if ($revision->item->stream === 'graphic' && !$revision->documents()
+            ->where('status', 'active')->where('document_type', 'artwork')->where('source', 'link')->exists()) {
+            throw ValidationException::withMessages(['documents' => ['The approved revision needs an active print-ready artwork link.']]);
+        }
 
         DB::transaction(function () use ($data, $revision) {
             DesignRevision::query()

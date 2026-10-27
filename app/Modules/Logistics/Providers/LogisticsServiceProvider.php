@@ -24,6 +24,8 @@ class LogisticsServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        \App\Modules\Logistics\Models\TripRequest::observe(\App\Modules\Logistics\Observers\TripRequestSmsObserver::class);
+
         // Trip request progress is shown to the requester as steps on the
         // request itself (see the `steps` field in TripRequestResource), not
         // as notifications — so there's no observer here any more.

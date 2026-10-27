@@ -11,7 +11,11 @@ class DesignItemReadinessService
     {
         $errors = [];
 
-        if ($item->status === 'not_required') {
+        if ($item->job?->status === 'cancelled' || $item->job?->enquiry?->status === 'cancelled') {
+            $errors['status'][] = 'A cancelled design job cannot be sent to Printing.';
+        }
+
+        if (in_array($item->getRawOriginal('status'), ['not_required', 'cancelled'], true)) {
             $errors['status'][] = 'Restore this task before marking it print ready.';
         }
 
@@ -32,12 +36,12 @@ class DesignItemReadinessService
             $errors['print_material'][] = 'Select a print material or enter a temporary material name.';
         }
 
-        if (!$item->documents()
-            ->where('status', 'active')
-            ->where('document_type', 'artwork')
-            ->where('source', 'link')
-            ->exists()) {
-            $errors['documents'][] = 'Attach an active Artwork link before marking this item print ready.';
+        $latest = $item->revisions()->first();
+        if (!$latest) {
+            $errors['revision'][] = 'Create, complete, and approve an artwork version before sending to Printing.';
+        } elseif (!$item->documents()->where('design_revision_id', $latest->id)
+            ->where('status', 'active')->where('document_type', 'artwork')->where('source', 'link')->exists()) {
+            $errors['documents'][] = 'Attach an active print-ready Artwork link to the latest revision.';
         }
 
         $this->requireLatestApprovedRevision($item, $errors);
@@ -51,7 +55,11 @@ class DesignItemReadinessService
     {
         $errors = [];
 
-        if ($item->status === 'not_required') {
+        if ($item->job?->status === 'cancelled' || $item->job?->enquiry?->status === 'cancelled') {
+            $errors['status'][] = 'A cancelled design job cannot be sent to Production.';
+        }
+
+        if (in_array($item->getRawOriginal('status'), ['not_required', 'cancelled'], true)) {
             $errors['status'][] = 'Restore this task before marking it production ready.';
         }
 
@@ -89,8 +97,8 @@ class DesignItemReadinessService
     private function requireLatestApprovedRevision(DesignItem $item, array &$errors): void
     {
         $latest = $item->revisions()->orderByDesc('version_number')->first();
-        if ($latest && $latest->status !== 'approved') {
-            $errors['revision'][] = "Approve artwork version {$latest->version_number} and record the approval evidence first.";
+        if ($latest && ($latest->status !== 'approved' || !$latest->completed_at)) {
+            $errors['revision'][] = "Complete and approve artwork version {$latest->version_number} first.";
         }
 
         if ($item->changeRequests()->where('status', 'open')->exists()) {

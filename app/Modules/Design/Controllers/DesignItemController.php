@@ -70,6 +70,7 @@ class DesignItemController extends Controller
         $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
+            ->whereHas('job', fn ($job) => $job->where('status', '!=', 'cancelled'))
             ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required']);
         if ($scope === 'overdue') {
             DesignSchedule::overdueItems($myActiveQuery);
@@ -80,7 +81,8 @@ class DesignItemController extends Controller
         $myWorkApplied = $request->boolean('mine') && $myActiveCount > 0;
 
         if ($myWorkApplied) {
-            $query->where('assigned_to', auth()->id());
+            $query->where('assigned_to', auth()->id())
+                ->whereHas('job', fn ($job) => $job->where('status', '!=', 'cancelled'));
         }
 
         if ($scope === 'overdue') {
@@ -155,6 +157,7 @@ class DesignItemController extends Controller
         $myActiveQuery = DesignItem::query()
             ->where('stream', $stream)
             ->where('assigned_to', auth()->id())
+            ->whereHas('job', fn ($job) => $job->where('status', '!=', 'cancelled'))
             ->whereNotIn('status', ['done', 'cancelled', 'print_ready', 'production_ready', 'handed_off', 'not_required']);
         if ($scope === 'overdue') {
             DesignSchedule::overdueItems($myActiveQuery);
@@ -166,7 +169,8 @@ class DesignItemController extends Controller
 
         $candidateQuery = DesignItem::query()->where('stream', $stream);
         if ($myWorkApplied) {
-            $candidateQuery->where('assigned_to', auth()->id());
+            $candidateQuery->where('assigned_to', auth()->id())
+                ->whereHas('job', fn ($job) => $job->where('status', '!=', 'cancelled'));
         }
         if ($scope === 'overdue') {
             DesignSchedule::overdueItems($candidateQuery);
@@ -248,7 +252,7 @@ class DesignItemController extends Controller
             ->get()
             ->groupBy(fn (DesignItem $item) => $this->bundleKey($item));
 
-        $completedStatuses = ['done', 'print_ready', 'production_ready', 'handed_off'];
+        $completedStatuses = DesignItem::COMPLETED_STATUSES;
         $workingStatuses = ['in_design'];
         $waitingStatuses = ['pending', 'awaiting_client_approval', 'client_changes_requested'];
         $data = $selectedKeys->map(function (string $key) use ($allItems, $groups, $completedStatuses, $workingStatuses, $waitingStatuses) {
@@ -351,6 +355,9 @@ class DesignItemController extends Controller
         $data['design_job_id'] = $job->id;
         $data['created_by'] = auth()->id();
         $data['updated_by'] = auth()->id();
+        if (in_array($data['status'] ?? null, ['print_ready', 'production_ready'], true)) {
+            throw ValidationException::withMessages(['status' => ['Create the item first, then use the explicit readiness action.']]);
+        }
 
         $item = DesignItem::create($data);
         if ($item->outsourced_partner_name !== null) {
@@ -387,6 +394,16 @@ class DesignItemController extends Controller
             $data['print_ready_at'] = null;
         }
 
+        if (($data['status'] ?? null) === 'print_ready') {
+            $candidate = clone $item;
+            $candidate->fill($data);
+            $this->readiness->ensurePrintReady($candidate);
+        } elseif (($data['status'] ?? null) === 'production_ready') {
+            $candidate = clone $item;
+            $candidate->fill($data);
+            $this->readiness->ensureProductionReady($candidate);
+        }
+
         if (array_key_exists('assigned_to', $data) && $data['assigned_to'] != $previousAssignedTo) {
             $this->workTracking->closeForWorkflow($item, 'paused', 'switched_task');
         }
@@ -396,7 +413,9 @@ class DesignItemController extends Controller
         if (array_key_exists('status', $data) && $data['status'] !== $previousStatus) {
             if ($data['status'] === 'awaiting_client_approval') {
                 $this->workTracking->closeForWorkflow($item, 'paused', 'waiting_client_feedback');
-            } elseif (in_array($data['status'], ['done', 'cancelled', 'print_ready', 'production_ready'], true)) {
+            } elseif ($data['status'] === 'cancelled') {
+                $this->workTracking->closeForWorkflow($item, 'cancelled');
+            } elseif (in_array($data['status'], ['done', 'print_ready', 'production_ready'], true)) {
                 $this->workTracking->closeForWorkflow($item, 'completed');
             }
         }
@@ -613,6 +632,19 @@ class DesignItemController extends Controller
         return response()->json([
             'message' => 'Design work paused',
             'data' => new DesignItemResource($this->workTracking->pause($item, $data['reason'], $data['details'] ?? null)),
+        ]);
+    }
+
+    public function stopWork(Request $request, DesignItem $item): JsonResponse
+    {
+        $data = $request->validate([
+            'outcome' => ['required', Rule::in(['completed', 'cancelled', 'rejected'])],
+            'reason' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        return response()->json([
+            'message' => 'Design work stopped',
+            'data' => new DesignItemResource($this->workTracking->stop($item, $data['outcome'], $data['reason'] ?? null)),
         ]);
     }
 }
