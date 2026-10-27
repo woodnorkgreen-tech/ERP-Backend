@@ -33,7 +33,7 @@ class StockMovementRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         if (! $this->has('lines') && $this->has('material_id')) {
-            $this->merge(['lines' => [$this->except(['type', 'logged_at', 'warehouse_code'])]]);
+            $this->merge(['lines' => [$this->except(['type', 'logged_at', 'warehouse_code', 'client_request_id'])]]);
         }
     }
 
@@ -45,6 +45,8 @@ class StockMovementRequest extends FormRequest
             'type' => ['required', Rule::in(StockMovementPoster::TYPES)],
             'logged_at' => 'nullable|date',
             'warehouse_code' => 'nullable|string|max:20',
+            // Report 79E: one per press of Confirm, reused on retry.
+            'client_request_id' => 'nullable|uuid',
             'lines' => 'required|array|min:1|max:100',
             // A receive line may name an existing material OR describe a new one
             // to register on the spot — see lines.*.new_material below. Every

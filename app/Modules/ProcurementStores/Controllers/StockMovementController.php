@@ -3,10 +3,13 @@
 namespace App\Modules\ProcurementStores\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\ProcurementStores\Models\InventoryLog;
+use App\Modules\ProcurementStores\Models\StockMovementSubmission;
 use App\Modules\ProcurementStores\Requests\StockMovementRequest;
 use App\Modules\ProcurementStores\Services\StockMovementPoster;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -34,12 +37,40 @@ class StockMovementController extends Controller
         $type = $request->movementType();
         $lines = $request->lines();
 
+        /*
+         * Report 79E (P0-2): a resend after a timeout used to move the stock a
+         * second time. A screen that sends a client_request_id (one per press
+         * of Confirm, reused on retry) gets the first answer back instead.
+         */
+        $clientRequestId = $request->input('client_request_id');
+        $userId = (int) auth()->id();
+        $hash = $clientRequestId ? StockMovementSubmission::hashOf($type, $lines) : null;
+        if ($clientRequestId && ($prior = $this->submission($userId, $clientRequestId))) {
+            return $this->replay($prior, $hash);
+        }
+
         $logs = [];
         $boards = [];
         $batchNumber = null;
+        $submission = null;
 
         try {
-            DB::transaction(function () use ($type, $lines, &$logs, &$boards, &$batchNumber) {
+            DB::transaction(function () use ($type, $lines, $clientRequestId, $userId, $hash, &$logs, &$boards, &$batchNumber, &$submission) {
+                // Reset per attempt: a retried attempt starts from nothing.
+                $logs = [];
+                $boards = [];
+                $submission = null;
+
+                if ($clientRequestId) {
+                    // First write, inside the movement's transaction: it commits
+                    // with the stock or not at all, and a concurrent resend waits
+                    // here on the unique key, then fails and replays.
+                    $submission = StockMovementSubmission::create([
+                        'user_id' => $userId, 'client_request_id' => $clientRequestId,
+                        'movement_type' => $type, 'payload_hash' => $hash,
+                    ]);
+                }
+
                 // Every line of one posting carries the same batch number, so the
                 // ledger can show a delivery as the single event it was.
                 $batchNumber = $this->poster->newBatchNumber();
@@ -83,13 +114,68 @@ class StockMovementController extends Controller
                     $logs[] = $result['log'];
                     $boards = array_merge($boards, $result['boards']);
                 }
-            });
+
+                $submission?->update(['batch_number' => $batchNumber, 'log_ids' => array_map(fn ($log) => $log->id, $logs)]);
+            }, attempts: 3);
+            // attempts: a collision with another Stores user's issue (deadlock,
+            // or MariaDB's "record has changed since last read") rolls back and
+            // re-runs against the committed state, so the second user gets the
+            // real answer ("only N remaining") instead of a server error.
         } catch (\DomainException $e) {
             // Anything raised outside the per-line loop. Kept so a rule about
             // the data never surfaces as a server fault.
             return response()->json(['message' => $e->getMessage(), 'status' => 'error'], 422);
+        } catch (QueryException $e) {
+            // A concurrent resend of the same confirmation committed first.
+            if ($clientRequestId && (int) ($e->errorInfo[1] ?? 0) === 1062
+                && ($prior = $this->submission($userId, $clientRequestId))) {
+                return $this->replay($prior, $hash);
+            }
+            throw $e;
         }
 
+        $payload = $this->respond($type, $logs, $boards, $batchNumber);
+        // Saved after commit. If the process dies before this, a replay rebuilds
+        // the answer from the movement ids written inside the transaction.
+        $submission?->forceFill(['response' => $payload])->save();
+
+        return response()->json($payload);
+    }
+
+    private function submission(int $userId, string $clientRequestId): ?StockMovementSubmission
+    {
+        return StockMovementSubmission::where('user_id', $userId)->where('client_request_id', $clientRequestId)->first();
+    }
+
+    /**
+     * The first answer to this confirmation, with Finance's current posting
+     * status (it may have been retried since). Nothing moves.
+     */
+    private function replay(StockMovementSubmission $prior, ?string $hash): JsonResponse
+    {
+        if (! hash_equals($prior->payload_hash, (string) $hash)) {
+            return response()->json([
+                'message' => 'This confirmation was already used for different lines or quantities, so nothing was issued. Review the selection and confirm again.',
+                'status' => 'error',
+                'code' => 'REQUEST_REUSED',
+            ], 409);
+        }
+
+        $logs = InventoryLog::whereIn('id', $prior->log_ids ?? [])->orderBy('id')->get()->all();
+        $payload = $this->respond($prior->movement_type, $logs, [], $prior->batch_number);
+        foreach (['boards_created', 'labels_required', 'boards'] as $key) {
+            if (isset($prior->response[$key])) {
+                $payload[$key] = $prior->response[$key];
+            }
+        }
+        $payload['replayed'] = true;
+        $payload['message'] = 'Already recorded — nothing was moved again. '.$payload['message'];
+
+        return response()->json($payload);
+    }
+
+    private function respond(string $type, array $logs, array $boards, ?string $batchNumber): array
+    {
         // Report 79D: the transaction has committed and the outbox has run, so
         // say what Finance actually did with each line instead of assuming it.
         $posting = app(\App\Modules\ProcurementStores\Services\StoresPostingResult::class)
@@ -98,7 +184,7 @@ class StockMovementController extends Controller
             ? app(\App\Modules\ProcurementStores\Services\StoresPostingResult::class)->sentence($posting['summary'])
             : '';
 
-        return response()->json([
+        return [
             'message' => trim($this->summary($type, count($logs), count($boards)).' '.$postingSentence),
             'status' => 'success',
             'batch_number' => $batchNumber,
@@ -114,7 +200,8 @@ class StockMovementController extends Controller
             // on, so the screen has to know to ask before it clears the form.
             'labels_required' => count($boards) > 0,
             'boards' => $this->describeBoards($boards),
-        ]);
+            'replayed' => false,
+        ];
     }
 
     /** Strip any `lines.N.` the poster's own message may already carry. */

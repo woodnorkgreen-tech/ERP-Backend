@@ -30,6 +30,7 @@ final class ReceivablesTabs
 
     /** Slices the register offers, in the order it offers them. */
     public const SLICES = [
+        'enquiries', 'awaiting_deposit', 'projects', 'completed', 'closed', 'canceled',
         self::ACTION,
         self::PARTIAL,
         self::MOBILIZED,
@@ -50,6 +51,20 @@ final class ReceivablesTabs
      */
     public static function matches(string $tab, ProjectEnquiry $enquiry, array $progress): bool
     {
+        $stages = [
+            'awaiting_deposit' => ['quote_approved', 'awaiting_deposit'],
+            'projects' => ['planning', 'in_progress'],
+            'completed' => ['completed'],
+            'closed' => ['closed'],
+            'canceled' => ['cancelled'],
+        ];
+        if ($tab === 'enquiries') {
+            return ! in_array($enquiry->status, array_merge(...array_values($stages)), true);
+        }
+        if (isset($stages[$tab])) {
+            return in_array($enquiry->status, $stages[$tab], true);
+        }
+
         $quote = (float) $progress['total_quote'];
         $paid = (float) $progress['total_paid'];
         $remaining = (float) $progress['remaining'];

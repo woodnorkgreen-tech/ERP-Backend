@@ -383,4 +383,92 @@ class ProjectMaterialIssueTest extends TestCase
         $this->assertStringNotContainsString('charged to the project', $response->json('message'));
         $this->assertSame('failed', DB::table('stores_finance_postings')->where('inventory_log_id', $response->json('posting.0.inventory_log_id'))->value('status'));
     }
+
+    /* ── Report 79E: a resent confirmation never moves stock twice ─────── */
+
+    private function confirm(array $lines, string $requestId)
+    {
+        return $this->postJson('/api/procurement-stores/movements', ['type' => 'issue', 'client_request_id' => $requestId, 'lines' => $lines]);
+    }
+
+    public function test_a_resent_confirmation_replays_the_first_answer_and_moves_nothing(): void
+    {
+        $material = $this->material('MDF 18mm', 20);
+        $planned = $this->specify($material, 10);
+        $id = (string) Str::uuid();
+
+        $first = $this->confirm([$this->line($material, $planned, 4)], $id)->assertOk();
+        $this->assertFalse($first->json('replayed'));
+
+        // The response never arrived; the screen sends the same thing again.
+        $second = $this->confirm([$this->line($material, $planned, '4')], $id)->assertOk();
+
+        $this->assertTrue($second->json('replayed'));
+        $this->assertStringContainsString('nothing was moved again', $second->json('message'));
+        $this->assertSame($first->json('batch_number'), $second->json('batch_number'));
+        $this->assertSame(16.0, $this->onHand($material));
+        $this->assertSame(1, InventoryLog::where('project_material_id', $planned->id)->count());
+        $this->assertSame(1, DB::table('stores_finance_postings')->whereIn('inventory_log_id', InventoryLog::where('project_material_id', $planned->id)->pluck('id'))->count());
+    }
+
+    public function test_a_confirmation_id_reused_for_different_quantities_is_refused(): void
+    {
+        $material = $this->material('MDF 18mm', 20);
+        $planned = $this->specify($material, 10);
+        $id = (string) Str::uuid();
+
+        $this->confirm([$this->line($material, $planned, 4)], $id)->assertOk();
+        $this->confirm([$this->line($material, $planned, 5)], $id)
+            ->assertStatus(409)->assertJsonPath('code', 'REQUEST_REUSED');
+
+        $this->assertSame(16.0, $this->onHand($material));
+        $this->assertSame(1, InventoryLog::where('project_material_id', $planned->id)->count());
+    }
+
+    public function test_a_refused_confirmation_can_be_sent_again_once_corrected(): void
+    {
+        $material = $this->material('MDF 18mm', 20);
+        $planned = $this->specify($material, 10);
+        $id = (string) Str::uuid();
+
+        // Refused inside the transaction: the record of this id rolls back too.
+        $this->confirm([$this->line($material, $planned, 11)], $id)->assertStatus(422);
+        $this->assertSame(0, DB::table('stock_movement_submissions')->count());
+
+        $this->confirm([$this->line($material, $planned, 10)], (string) Str::uuid())->assertOk();
+        $this->assertSame(10.0, $this->onHand($material));
+    }
+
+    public function test_the_same_id_from_another_user_is_a_separate_confirmation(): void
+    {
+        $material = $this->material('MDF 18mm', 20);
+        $planned = $this->specify($material, 10);
+        $id = (string) Str::uuid();
+
+        $this->confirm([$this->line($material, $planned, 2)], $id)->assertOk();
+        $other = User::factory()->create(['is_active' => true]);
+        $other->assignRole('Stores');
+        Sanctum::actingAs($other->fresh());
+        $this->confirm([$this->line($material, $planned, 2)], $id)->assertOk()->assertJsonPath('replayed', false);
+
+        $this->assertSame(16.0, $this->onHand($material));
+    }
+
+    public function test_a_movement_without_an_id_behaves_as_before(): void
+    {
+        $material = $this->material('MDF 18mm', 20);
+        $planned = $this->specify($material, 10);
+
+        $this->issue([$this->line($material, $planned, 2)])->assertOk();
+        $this->issue([$this->line($material, $planned, 2)])->assertOk();
+
+        $this->assertSame(16.0, $this->onHand($material));
+        $this->assertSame(0, DB::table('stock_movement_submissions')->count());
+    }
+
+    public function test_check_out_routes_are_retired(): void
+    {
+        $this->postJson('/api/procurement-stores/check-out', [])->assertNotFound();
+        $this->postJson('/api/procurement-stores/batch-check-out', [])->assertNotFound();
+    }
 }

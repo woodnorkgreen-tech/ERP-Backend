@@ -343,13 +343,8 @@ class ProcurementStoresController extends Controller
             $bc = $isBoard ? $boardCounts->get($material->id) : null;
             $unitSummary = $material->isConsumableUnit() ? app(\App\Modules\ProcurementStores\Services\ConsumableUnitService::class)->summary($material) : null;
 
-            $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
-            $onHand = $bc
-                ? (float) $bc->in_stores_cnt
-                : ($unitSummary ? (float) $unitSummary['total_remaining'] : (float) ($material->stock?->quantity_on_hand ?? 0));
-            $available = $bc
-                ? max(0.0, (float) $bc->available_cnt - $reserved)
-                : ($unitSummary ? (float) $unitSummary['available_quantity'] : (float) ($material->stock ? ($material->stock->quantity_on_hand - $reserved) : 0));
+            // Report 79E: the one availability rule, shared with the issue sheet.
+            ['on_hand' => $onHand, 'reserved' => $reserved, 'available' => $available] = $valuation->issuable($material, $bc, $unitSummary);
 
             return [
                 'id' => $material->id,
@@ -446,16 +441,9 @@ class ProcurementStoresController extends Controller
         foreach ($summaryMaterials as $material) {
             $isBoard = $material->isBoardTrackable();
             $bc = $isBoard ? $boardCounts->get($material->id) : null;
-            $unitSummary = $material->isConsumableUnit() ? app(\App\Modules\ProcurementStores\Services\ConsumableUnitService::class)->summary($material) : null;
             $stock = $material->stock;
 
-            $reserved = (float) ($stock?->quantity_reserved ?? 0);
-            $onHand = $bc
-                ? (float) $bc->in_stores_cnt
-                : ($unitSummary ? (float) $unitSummary['total_remaining'] : (float) ($stock?->quantity_on_hand ?? 0));
-            $available = $bc
-                ? max(0.0, (float) $bc->available_cnt - $reserved)
-                : ($unitSummary ? (float) $unitSummary['available_quantity'] : (float) ($stock ? ($stock->quantity_on_hand - $reserved) : 0));
+            ['on_hand' => $onHand, 'reserved' => $reserved, 'available' => $available] = $valuation->issuable($material, $bc);
             $minLevel = (float) ($stock?->min_stock_level ?? 0);
             $disposition = $material->issue_disposition
                 ?? ($material->material_type === 'reusable' ? 'returnable' : 'consumed');
@@ -595,41 +583,6 @@ class ProcurementStoresController extends Controller
                 'batch_number' => $b->batch_number,
                 'material' => ['name' => $material?->material_name, 'code' => $material?->material_code],
             ], $boards),
-        ]);
-    }
-
-    /**
-     * Process a stock check-out (Deduct from inventory)
-     *
-     * Individually tracked board/sheet materials must NOT be checked out through
-     * this generic endpoint. Reusable tools still use this normal quantity flow.
-     */
-    public function checkOut(Request $request, StockMovementPoster $poster): JsonResponse
-    {
-        if (! $this->allows(Permissions::STORES_MANAGE)) {
-            return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
-        }
-
-        $request->validate([
-            'material_id' => 'required|exists:library_materials,id',
-            'quantity' => 'required|numeric|min:0.01',
-            'entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'project_id' => 'nullable|exists:projects,id',
-            'project_material_id' => 'nullable|exists:element_materials,id',
-            'notes' => 'nullable|string',
-            'logged_at' => 'nullable|date',
-            'inventory_lot_id' => 'nullable|exists:inventory_lots,id',
-            'serial_item_ids' => 'nullable|array',
-            'serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
-        ]);
-
-        $log = $poster->post('issue', $request->all())['log'];
-
-        return response()->json([
-            'message' => 'Stock issued successfully',
-            'data' => $log,
-            'batch_number' => $log->batch_number,
-            'status' => 'success',
         ]);
     }
 
@@ -871,46 +824,6 @@ class ProcurementStoresController extends Controller
             'warehouse_code' => $request->warehouse_code ?? 'MAIN',
             'logged_at' => $request->logged_at ?? now(),
         ], 'Batch check-in processed successfully');
-    }
-
-    /**
-     * Process batch check-out (multiple materials with same batch number)
-     */
-    public function batchCheckOut(Request $request, StockMovementPoster $poster): JsonResponse
-    {
-        if (! $this->allows(Permissions::STORES_MANAGE)) {
-            return response()->json(['message' => 'Only Stores team members can issue stock.'], 403);
-        }
-
-        $request->validate([
-            'items' => 'required|array|min:1',
-            'items.*.material_id' => 'required|exists:library_materials,id',
-            'items.*.project_material_id' => 'nullable|exists:element_materials,id',
-            'items.*.quantity' => 'required|numeric|min:0.01',
-            'items.*.entered_uom_id' => 'nullable|integer|exists:units_of_measure,id',
-            'items.*.reference_no' => 'nullable|string',
-            'items.*.notes' => 'nullable|string',
-            'items.*.usage_type' => 'nullable|string|in:consumable,reusable',
-            'items.*.requestor' => 'nullable|string',
-            'items.*.inventory_lot_id' => 'nullable|exists:inventory_lots,id',
-            'items.*.serial_item_ids' => 'nullable|array',
-            'items.*.serial_item_ids.*' => 'integer|exists:inventory_serial_items,id',
-            'requestor_name' => 'required|string|max:255',
-            'reference_no' => 'nullable|string|max:255',
-            'project_id' => 'nullable|exists:projects,id',
-            'logged_at' => 'nullable|date',
-        ]);
-
-        return $this->postBatch($poster, 'issue', $request, [
-            'project_id' => $request->project_id ?: null,
-            'logged_at' => $request->logged_at ?? now(),
-        ], 'Batch check-out processed successfully', function (array $item) use ($request) {
-            return [
-                'recipient_name' => $item['requestor'] ?? $request->requestor_name ?? null,
-                'reference_no' => $item['reference_no'] ?? $request->reference_no ?? null,
-                'notes' => $item['notes'] ?? 'Project material issue',
-            ];
-        });
     }
 
     /**

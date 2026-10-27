@@ -700,4 +700,88 @@ class BoardLifecycleTest extends TestCase
         $this->assertSame(1, $response->json('count'));
         $this->assertSame($unvalued->tracking_code, $response->json('data.0.boards.0.tracking_code'));
     }
+
+    /* ── Report 79E (P0-5): board reservations against an approved line ── */
+
+    /** @return array{project: int, code: string, line: \App\Models\ElementMaterial} */
+    private function approvedBoardLine(float $quantity): array
+    {
+        $userId = auth()->id();
+        $clientId = DB::table('clients')->insertGetId([
+            'full_name' => 'Client', 'email' => uniqid().'@t.local', 'phone' => '0700000000', 'address' => 'Nairobi',
+            'city' => 'Nairobi', 'county' => 'Nairobi', 'customer_type' => 'company', 'lead_source' => 'test',
+            'preferred_contact' => 'email', 'registration_date' => now()->toDateString(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $code = 'WNG-BRD-'.uniqid();
+        $enquiryId = DB::table('project_enquiries')->insertGetId([
+            'status' => 'in_progress', 'date_received' => now()->toDateString(), 'client_id' => $clientId, 'title' => 'Board job',
+            'contact_person' => 'C', 'enquiry_number' => 'ENQ-'.$code, 'job_number' => $code, 'created_by' => $userId,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $projectId = DB::table('projects')->insertGetId(['enquiry_id' => $enquiryId, 'project_id' => $code, 'status' => 'in_progress', 'created_at' => now(), 'updated_at' => now()]);
+        $taskId = DB::table('enquiry_tasks')->insertGetId(['project_enquiry_id' => $enquiryId, 'type' => 'materials', 'title' => 'Materials', 'status' => 'in_progress', 'created_by' => $userId, 'created_at' => now(), 'updated_at' => now()]);
+        $dataId = DB::table('task_materials_data')->insertGetId(['enquiry_task_id' => $taskId, 'project_info' => json_encode(['approval_status' => ['all_approved' => true]]), 'created_at' => now(), 'updated_at' => now()]);
+        $elementId = \App\Models\ProjectElement::create(['persistent_id' => (string) \Illuminate\Support\Str::uuid(), 'task_materials_data_id' => $dataId, 'element_type' => 'stand', 'name' => 'BOOTH', 'category' => 'production', 'is_included' => true])->id;
+        $line = \App\Models\ElementMaterial::create([
+            'project_element_id' => $elementId, 'library_material_id' => $this->material->id, 'description' => 'MDF 18mm',
+            'unit_of_measurement' => 'sheet', 'quantity' => $quantity, 'is_included' => true,
+        ]);
+
+        return ['project' => $projectId, 'code' => $code, 'line' => $line];
+    }
+
+    private function raise(array $job, int $qty)
+    {
+        return $this->postJson('/api/procurement-stores/board-requests', [
+            'job_ref' => $job['code'], 'project_id' => $job['project'], 'project_material_id' => $job['line']->id,
+            'material_id' => $this->material->id, 'qty' => $qty, 'recipient_name' => 'Otieno',
+        ]);
+    }
+
+    public function test_a_board_request_can_be_raised_against_an_approved_line(): void
+    {
+        $this->actAs('Stores');
+        collect(range(1, 3))->each(fn () => $this->makeBoard());
+        $job = $this->approvedBoardLine(2);
+
+        $this->raise($job, 2)->assertCreated();
+
+        $this->assertSame(2.0, (float) Stock::where('material_id', $this->material->id)->value('quantity_reserved'));
+    }
+
+    public function test_open_requests_count_against_the_line_so_it_cannot_be_reserved_twice(): void
+    {
+        $this->actAs('Stores');
+        collect(range(1, 4))->each(fn () => $this->makeBoard());
+        $job = $this->approvedBoardLine(2);
+
+        $this->raise($job, 2)->assertCreated();
+        $this->raise($job, 1)->assertStatus(422)->assertSee('already reserved', false);
+
+        $this->assertSame(1, BoardRequest::count());
+    }
+
+    public function test_boards_reserved_for_one_job_are_not_offered_to_another(): void
+    {
+        $this->actAs('Stores');
+        collect(range(1, 2))->each(fn () => $this->makeBoard());
+        $first = $this->approvedBoardLine(2);
+        $second = $this->approvedBoardLine(1);
+
+        $this->raise($first, 2)->assertCreated();
+        $this->raise($second, 1)->assertStatus(422)->assertJsonPath('available', 0);
+    }
+
+    public function test_a_board_issue_records_its_finance_posting_with_the_stock(): void
+    {
+        $this->actAs('Stores');
+        $boards = collect(range(1, 2))->map(fn () => $this->makeBoard());
+        $job = $this->approvedBoardLine(2);
+        $requestId = $this->raise($job, 2)->assertCreated()->json('request.id');
+
+        $this->postJson("/api/procurement-stores/board-requests/{$requestId}/fulfil", ['board_ids' => $boards->pluck('id')->all()])->assertOk();
+
+        $log = InventoryLog::where('project_material_id', $job['line']->id)->where('type', 'check_out')->sole();
+        $this->assertSame(1, DB::table('stores_finance_postings')->where('inventory_log_id', $log->id)->where('posting_type', 'issue_cost')->count());
+    }
 }

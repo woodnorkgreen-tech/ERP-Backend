@@ -204,6 +204,18 @@ class ProjectElementRegistry
                 : (array_key_exists('libraryMaterialId', $input) && filled($input['libraryMaterialId']) ? (int) $input['libraryMaterialId'] : null);
             $previousId = $line->library_material_id ? (int) $line->library_material_id : null;
 
+            // Report 79E (B4): the browser's choice is re-checked here. A
+            // suggestion seen minutes ago may since have been deleted,
+            // rejected or retired; a made-up id must never become identity.
+            if ($libraryMaterialId !== null && $libraryMaterialId !== $previousId) {
+                $status = \App\Modules\MaterialsLibrary\Models\LibraryMaterial::whereKey($libraryMaterialId)->value('item_status');
+                if (! in_array($status, ['Active', 'Under Review'], true)) {
+                    throw ValidationException::withMessages(['materials' => $status === null
+                        ? "\"{$input['description']}\": the chosen Material Library item no longer exists. Choose it again."
+                        : "\"{$input['description']}\": the chosen Material Library item is {$status} and cannot be used. Choose another."]);
+                }
+            }
+
             // Report 79C: an item still Under Review is not a catalogue identity
             // yet. Choosing one parks the line on it — the pending reference
             // Resolve already uses — and activation links it (linkAwaiting).

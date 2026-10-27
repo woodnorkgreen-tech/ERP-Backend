@@ -172,6 +172,39 @@ class RequirementUnits
                 .' is) when resolving or with "Set unit reading", or choose a material stocked in '.$required->name.'.']);
     }
 
+    /**
+     * The units a person may issue this line in: the stock unit, the
+     * material's own conversions into it, and the reading approved for this
+     * line. Report 79E: one copy, read by the materials endpoint and the issue
+     * sheet alike.
+     *
+     * @param  iterable<int, string>  $uomCodes  units_of_measure code by id
+     * @return array<int, array{id: int, code: string, factor: float, basis: string}>
+     */
+    public function issueUnits(ElementMaterial $line, iterable $uomCodes): array
+    {
+        $uomCodes = collect($uomCodes);
+        $material = $line->libraryMaterial;
+        if (! $material || ! $material->base_uom_id) {
+            return [];
+        }
+        $base = (int) $material->base_uom_id;
+        $units = [$base => ['id' => $base, 'code' => (string) ($uomCodes[$base] ?? $material->unit_of_measure), 'factor' => 1.0, 'basis' => 'stock']];
+        foreach ($material->uomConversions as $conversion) {
+            if ((int) $conversion->to_uom_id !== $base || (float) $conversion->factor <= 0) {
+                continue;
+            }
+            $id = (int) $conversion->from_uom_id;
+            $units[$id] ??= ['id' => $id, 'code' => (string) ($uomCodes[$id] ?? '?'), 'factor' => (float) $conversion->factor, 'basis' => 'material'];
+        }
+        $lineUnit = (int) $line->requirement_uom_id;
+        if ($lineUnit && $line->requirement_base_factor !== null && (int) $line->requirement_base_uom_id === $base) {
+            $units[$lineUnit] ??= ['id' => $lineUnit, 'code' => (string) ($uomCodes[$lineUnit] ?? $line->unit_of_measurement), 'factor' => (float) $line->requirement_base_factor, 'basis' => 'line'];
+        }
+
+        return array_values($units);
+    }
+
     /** Requirement in stock units, or null when it cannot be read. */
     public function requiredInBase(ElementMaterial $line, ?LibraryMaterial $material = null): ?string
     {

@@ -26,7 +26,6 @@ class ViewTypeFilter
         $confirmedJobStatuses  = ['quote_approved', 'awaiting_deposit'];
         // "In Progress / Active projects": deposit received, execution underway
         $activeProjectStatuses = ['planning', 'in_progress'];
-        $receivableStatuses    = ['quote_approved', 'awaiting_deposit', 'planning', 'in_progress', 'completed'];
 
         // Apply View Filter
         match ($view) {
@@ -37,7 +36,7 @@ class ViewTypeFilter
             'awaiting_deposit'       => $query->whereIn('status', $confirmedJobStatuses),
             // "In Progress" tab — only execution-phase statuses
             'projects'               => $query->whereIn('status', $activeProjectStatuses),
-            'receivables'            => $query->whereIn('status', $receivableStatuses),
+            'receivables'            => $query, // Billing follows every stage of the external enquiry lifecycle.
             // Default "New Enquiries" — everything before confirmation
             default                  => $query->whereNotIn('status', array_merge($confirmedJobStatuses, $activeProjectStatuses, $closedStatuses)),
         };

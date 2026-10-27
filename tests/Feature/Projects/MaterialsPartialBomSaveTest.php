@@ -164,6 +164,38 @@ class MaterialsPartialBomSaveTest extends TestCase
             ->assertJsonPath('code', 'ELEMENT_NEVER_SAVED');
     }
 
+    /** Report 79E (B4): the chosen catalogue item is re-checked on save. */
+    public function test_a_line_can_only_be_linked_to_an_item_that_still_exists_and_is_usable(): void
+    {
+        $task = $this->materialsTask();
+        Sanctum::actingAs($this->user('Project Officer'));
+        $make = fn (string $name, string $status) => \App\Modules\MaterialsLibrary\Models\LibraryMaterial::create([
+            'material_name' => $name, 'material_code' => 'MAT-'.uniqid(), 'category' => 'Boards',
+            'unit_of_measure' => 'sheet', 'unit_cost' => 100, 'item_status' => $status, 'is_active' => $status === 'Active',
+        ]);
+        $active = $make('MDF 18mm', 'Active');
+        $deleted = $make('MDF 9mm', 'Active');
+        $deleted->delete();
+        $inactive = $make('MDF 6mm', 'Inactive');
+        $save = fn (?int $materialId) => $this->postJson("/api/projects/tasks/{$task->id}/materials", [
+            'projectInfo' => ['projectId' => 'TEST-001'],
+            'projectElements' => [$this->element('0', 'Main Stage', 'production', [[
+                'description' => 'plain mdf 18 mm board', 'unitOfMeasurement' => 'sheet', 'quantity' => 4,
+                'libraryMaterialId' => $materialId,
+            ]])],
+        ]);
+
+        $save(999999)->assertStatus(422)->assertSee('no longer exists', false);
+        $save($deleted->id)->assertStatus(422)->assertSee('no longer exists', false);
+        $save($inactive->id)->assertStatus(422)->assertSee('Inactive', false);
+        $this->assertSame(0, ElementMaterial::count());
+
+        $save($active->id)->assertOk();
+        $line = ElementMaterial::sole();
+        $this->assertSame($active->id, (int) $line->library_material_id);
+        $this->assertSame('plain mdf 18 mm board', $line->description, 'The typed requirement is kept beside the link.');
+    }
+
     private function element(string $id, string $name, string $category, array $materials): array
     {
         return [

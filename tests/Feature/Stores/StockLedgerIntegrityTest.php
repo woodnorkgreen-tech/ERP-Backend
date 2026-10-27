@@ -142,13 +142,16 @@ class StockLedgerIntegrityTest extends TestCase
         $departmentId = \Illuminate\Support\Facades\DB::table('departments')->insertGetId(['name' => 'Workshop', 'created_at' => now(), 'updated_at' => now()]);
         $centreId = \Illuminate\Support\Facades\DB::table('cost_centres')->insertGetId(['code' => 'CC-LEDGER', 'name' => 'Workshop', 'hr_department_id' => $departmentId,
             'is_active' => true, 'created_at' => now(), 'updated_at' => now()]);
-        $response = $this->postJson('/api/procurement-stores/check-out', [
+        // Report 79E: /check-out is retired; the one issuing endpoint keeps the rule.
+        $this->postJson('/api/procurement-stores/check-out', ['material_id' => $this->material->id, 'quantity' => 1])->assertNotFound();
+        $response = $this->postJson('/api/procurement-stores/movements', ['type' => 'issue', 'lines' => [[
             'material_id' => $this->material->id,
             'quantity' => 4,
             'issue_purpose' => 'internal_consumption', 'cost_centre_id' => $centreId, 'notes' => 'Used by the workshop itself',
-        ]);
+            'recipient_name' => 'Workshop',
+        ]]]);
 
-        $response->assertStatus(422)->assertJsonValidationErrors('quantity');
+        $response->assertStatus(422)->assertJsonValidationErrors('lines.0.quantity');
         $this->assertStringContainsString('3 issuable', $response->json('message'));
         $this->assertSame(3.0, $this->onHand());
         $this->assertLedgerReconciles();

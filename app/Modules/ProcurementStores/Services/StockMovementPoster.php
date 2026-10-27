@@ -516,17 +516,21 @@ class StockMovementPoster
         $requiredBase = app(RequirementUnits::class)->requiredInBaseOrFail($planned, $material, 'quantity');
 
         if ($material->isConsumableUnit()) {
-            $issued = (string) InventoryLog::where('project_material_id', $planned->id)->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'));
-            $returns = (string) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->sum('quantity');
+            $issued = (string) InventoryLog::where('project_material_id', $planned->id)->whereIn('type', ['check_out', 'issue', 'consumption'])->lockForUpdate()->sum(DB::raw('ABS(quantity)'));
+            $returns = (string) InventoryLog::where('project_material_id', $planned->id)->fulfilmentReopeningReturns()->lockForUpdate()->sum('quantity');
             $remaining = bcsub(bcsub($requiredBase, bcsub($issued, $returns, 6), 6), number_format($this->retiredAgainst($planned, (float) $requiredBase), 6, '.', ''), 6);
             if (bccomp((string) $quantityInBase, $remaining, 6) > 0) $this->reject('quantity', "{$planned->description} has only {$remaining} remaining on the approved requirement.");
             return;
         }
 
+        // Report 79E (P0-4): locking reads. The line lock above makes a second
+        // issuer wait, but under REPEATABLE READ a plain SUM afterwards can still
+        // read the snapshot from before the first issuer committed. It held only
+        // because newBatchNumber() happened to serialise /movements first.
         $netIssued = (float) InventoryLog::where('project_material_id', $planned->id)
-                ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
+                ->whereIn('type', ['check_out', 'issue', 'consumption'])->lockForUpdate()->sum(DB::raw('ABS(quantity)'))
             - (float) InventoryLog::where('project_material_id', $planned->id)
-                ->fulfilmentReopeningReturns()->sum('quantity');
+                ->fulfilmentReopeningReturns()->lockForUpdate()->sum('quantity');
 
         $netIssued += $this->legacyIssuedAgainst($planned, $project, $materialsData, (float) $requiredBase);
 
@@ -557,11 +561,12 @@ class StockMovementPoster
                 ->where('material_id', $planned->library_material_id)
                 ->whereNull('project_material_id')
                 ->whereIn('type', ['check_out', 'issue', 'consumption'])
+                ->lockForUpdate()
                 ->sum(DB::raw('ABS(quantity)'))
             - (float) InventoryLog::where('project_id', $project->id)
                 ->where('material_id', $planned->library_material_id)
                 ->whereNull('project_material_id')
-                ->fulfilmentReopeningReturns()->sum('quantity');
+                ->fulfilmentReopeningReturns()->lockForUpdate()->sum('quantity');
 
         if ($legacyIssued <= 0) {
             return 0.0;
@@ -609,8 +614,10 @@ class StockMovementPoster
                 $this->reject('original_issue_log_id', 'Consumable issues are final and cannot be returned to stock.');
             }
 
+            // Locking read (Report 79E): two returns of the same issue must not
+            // both read "nothing returned yet" from an old snapshot.
             $alreadyReturned = (float) InventoryLog::where('original_issue_log_id', $issue->id)
-                ->where('type', 'return')->sum('quantity');
+                ->where('type', 'return')->lockForUpdate()->sum('quantity');
             if (!$issue->consumable_unit_id && $alreadyReturned + $returnQuantityBase > abs((float) $issue->quantity) + 0.00001) {
                 $this->reject('quantity', 'Return quantity exceeds the unreturned quantity from the original issue.');
             }

@@ -99,81 +99,105 @@ class BoardRequestController extends Controller
             ], 422);
         }
 
-        if ($request->filled('project_material_id')) {
-            $project = Project::findOrFail($request->project_id);
-            $planned = ElementMaterial::with('element.taskMaterialsData.task')
-                ->findOrFail($request->project_material_id);
-            $materialsData = $planned->element?->taskMaterialsData;
-            // Validate project and catalogue identity before applying the same
-            // sign-off gate used by quantity and controlled-stock issues.
-            if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
-                || (int) $planned->library_material_id !== (int) $material->id) {
-                return response()->json(['message' => 'This board line does not belong to the selected project.'], 422);
+        // Report 79E (P0-5): the requirement cap, the board count and the
+        // reservation are one decision, so they run under one set of locks.
+        // Before, two requests checked the same "remaining" without a lock and
+        // ignored each other's open reservations, so both could reserve the
+        // whole remainder (and the same physical boards).
+        $boardRequest = DB::transaction(function () use ($request, $material, $lifecycleOverride) {
+            if ($request->filled('project_material_id')) {
+                $project = Project::findOrFail($request->project_id);
+                $planned = ElementMaterial::with('element.taskMaterialsData.task')
+                    ->lockForUpdate()
+                    ->findOrFail($request->project_material_id);
+                $materialsData = $planned->element?->taskMaterialsData;
+                // Validate project and catalogue identity before applying the same
+                // sign-off gate used by quantity and controlled-stock issues.
+                if ((int) $materialsData?->task?->project_enquiry_id !== (int) $project->enquiry_id
+                    || (int) $planned->library_material_id !== (int) $material->id) {
+                    $this->refuse(['message' => 'This board line does not belong to the selected project.']);
+                }
+                if (! (bool) data_get($materialsData?->project_info, 'approval_status.all_approved', false)) {
+                    throw ValidationException::withMessages([
+                        'project_material_id' => 'Project Officer and Production must sign off the material list before Stores can issue it.',
+                    ]);
+                }
+
+                // Locking reads: under REPEATABLE READ a plain SUM after the
+                // line lock can read a snapshot from before a competing issue.
+                $alreadyIssued = (float) InventoryLog::where('project_material_id', $planned->id)
+                    ->whereIn('type', ['check_out', 'issue', 'consumption'])->lockForUpdate()->sum(DB::raw('ABS(quantity)'))
+                    - (float) InventoryLog::where('project_material_id', $planned->id)
+                        ->fulfilmentReopeningReturns()->lockForUpdate()->sum('quantity');
+                // Report 78B: boards are counted in the material's stock unit, so the
+                // requirement is read in it too (12 sqm is not 12 boards).
+                $requiredBase = (float) app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)
+                    ->requiredInBaseOrFail($planned, $material, 'qty');
+                // Report 78C: quantity recorded as fulfilled outside the ERP is not owed.
+                $retirements = app(\App\Modules\ProcurementStores\Services\MaterialRequirementRetirements::class);
+                $alreadyIssued += $retirements->retiredIn($planned, $requiredBase, (float) ($retirements->retiredBomByLine([$planned->id])[$planned->id] ?? 0));
+                // Boards already promised to this line by other open requests.
+                $reservedOnLine = (float) BoardRequest::where('project_material_id', $planned->id)
+                    ->whereIn('status', ['pending', 'partial'])->lockForUpdate()
+                    ->sum(DB::raw('qty_requested - qty_fulfilled'));
+                $remaining = max(0, $requiredBase - $alreadyIssued - $reservedOnLine);
+                if ((float) $request->qty > $remaining) {
+                    $this->refuse(['message' => $reservedOnLine > 0
+                        ? "Board quantity exceeds the remaining project requirement ({$remaining} left; {$reservedOnLine} already reserved by open requests)."
+                        : 'Board quantity exceeds the remaining project requirement.']);
+                }
             }
-            if (! (bool) data_get($materialsData?->project_info, 'approval_status.all_approved', false)) {
-                throw ValidationException::withMessages([
-                    'project_material_id' => 'Project Officer and Production must sign off the material list before Stores can issue it.',
+
+            // Serialise reservations per material on its stock row, then count
+            // boards on the shelf less those other open requests hold.
+            Stock::where('material_id', $material->id)->lockForUpdate()->first();
+            $reservedForMaterial = (int) BoardRequest::where('material_id', $material->id)
+                ->whereIn('status', ['pending', 'partial'])
+                ->sum(DB::raw('qty_requested - qty_fulfilled'));
+            $onShelf = Board::where('library_material_id', $material->id)
+                ->where('status', 'Available')
+                ->count();
+            $available = max(0, $onShelf - $reservedForMaterial);
+
+            if ($available < $request->qty) {
+                // Count every board for this material grouped by status so the
+                // caller can tell the user exactly why nothing is available
+                // (e.g. all allocated vs all consumed vs never checked in).
+                $breakdown = Board::where('library_material_id', $material->id)
+                    ->selectRaw('status, COUNT(*) as count')
+                    ->groupBy('status')
+                    ->pluck('count', 'status')
+                    ->toArray();
+
+                $total = array_sum($breakdown);
+                $onJob = ($breakdown['Allocated'] ?? 0)
+                       + ($breakdown['At Station'] ?? 0)
+                       + ($breakdown['WIP'] ?? 0);
+
+                if ($total === 0) {
+                    $reason = 'No boards have been checked into stores for this material yet.';
+                } elseif ($reservedForMaterial > 0 && $onShelf >= $request->qty) {
+                    $reason = "{$reservedForMaterial} board(s) on the shelf are already reserved by open requests.";
+                } elseif ($onJob === $total) {
+                    $reason = "All {$total} board(s) are currently out on jobs.";
+                } elseif ($onJob > 0) {
+                    $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
+                    $reason = "{$onJob} board(s) are out on jobs".($consumed > 0 ? ", {$consumed} consumed/scrapped." : '.');
+                } else {
+                    $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
+                    $reason = $consumed > 0
+                        ? "All {$consumed} board(s) have been consumed or scrapped."
+                        : 'No boards are currently available.';
+                }
+
+                $this->refuse([
+                    'message' => "Only {$available} {$material->material_name} board(s) available. Requested: {$request->qty}.",
+                    'available' => $available,
+                    'reason' => $reason,
+                    'breakdown' => $breakdown,
                 ]);
             }
 
-            $alreadyIssued = (float) InventoryLog::where('project_material_id', $planned->id)
-                ->whereIn('type', ['check_out', 'issue', 'consumption'])->sum(DB::raw('ABS(quantity)'))
-                - (float) InventoryLog::where('project_material_id', $planned->id)
-                    ->fulfilmentReopeningReturns()->sum('quantity');
-            // Report 78B: boards are counted in the material's stock unit, so the
-            // requirement is read in it too (12 sqm is not 12 boards).
-            $requiredBase = (float) app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)
-                ->requiredInBaseOrFail($planned, $material, 'qty');
-            // Report 78C: quantity recorded as fulfilled outside the ERP is not owed.
-            $retirements = app(\App\Modules\ProcurementStores\Services\MaterialRequirementRetirements::class);
-            $alreadyIssued += $retirements->retiredIn($planned, $requiredBase, (float) ($retirements->retiredBomByLine([$planned->id])[$planned->id] ?? 0));
-            if ((float) $request->qty > max(0, $requiredBase - $alreadyIssued)) {
-                return response()->json(['message' => 'Board quantity exceeds the remaining project requirement.'], 422);
-            }
-        }
-
-        $available = Board::where('library_material_id', $material->id)
-            ->where('status', 'Available')
-            ->count();
-
-        if ($available < $request->qty) {
-            // Count every board for this material grouped by status so the
-            // caller can tell the user exactly why nothing is available
-            // (e.g. all allocated vs all consumed vs never checked in).
-            $breakdown = Board::where('library_material_id', $material->id)
-                ->selectRaw('status, COUNT(*) as count')
-                ->groupBy('status')
-                ->pluck('count', 'status')
-                ->toArray();
-
-            $total = array_sum($breakdown);
-            $onJob = ($breakdown['Allocated'] ?? 0)
-                   + ($breakdown['At Station'] ?? 0)
-                   + ($breakdown['WIP'] ?? 0);
-
-            if ($total === 0) {
-                $reason = 'No boards have been checked into stores for this material yet.';
-            } elseif ($onJob === $total) {
-                $reason = "All {$total} board(s) are currently out on jobs.";
-            } elseif ($onJob > 0) {
-                $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
-                $reason = "{$onJob} board(s) are out on jobs".($consumed > 0 ? ", {$consumed} consumed/scrapped." : '.');
-            } else {
-                $consumed = ($breakdown['Consumed'] ?? 0) + ($breakdown['Scrapped'] ?? 0);
-                $reason = $consumed > 0
-                    ? "All {$consumed} board(s) have been consumed or scrapped."
-                    : 'No boards are currently available.';
-            }
-
-            return response()->json([
-                'message' => "Only {$available} {$material->material_name} board(s) available. Requested: {$request->qty}.",
-                'available' => $available,
-                'reason' => $reason,
-                'breakdown' => $breakdown,
-            ], 422);
-        }
-
-        $boardRequest = DB::transaction(function () use ($request, $material) {
             $br = BoardRequest::create([
                 'job_ref' => $request->job_ref,
                 'project_id' => $request->project_id,
@@ -352,16 +376,17 @@ class BoardRequestController extends Controller
                     'project_material_id' => $boardRequest->project_material_id,
                 ]);
 
+                // Board issues are cost-bearing Stores issues too. Report 79E
+                // (P0-5): announced inside the transaction, as /movements does,
+                // so the outbox row commits with the stock or not at all; the
+                // outbox itself defers the posting until after commit.
+                StockIssued::dispatch($issueLog);
+
                 return [$boardRequest, $boards, $issueLog];
             });
         } catch (\InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
-
-        // Board issues are cost-bearing Stores issues too. The generic inventory
-        // service dispatches this automatically; this specialized lifecycle owns
-        // its stock movement, so it must announce the same accounting event.
-        StockIssued::dispatch($issueLog);
 
         // Advance the workflow: create Logistics dispatch task + notify
         $this->workflow->onRequestFulfilled($boardRequest, $boards);
@@ -377,6 +402,12 @@ class BoardRequestController extends Controller
             'boards_issued' => $boards->pluck('tracking_code'),
             'request' => $boardRequest->fresh(['material', 'requester']),
         ]);
+    }
+
+    /** Leave the transaction with a 422 carrying this body (rolls back). */
+    private function refuse(array $body): never
+    {
+        throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json($body, 422));
     }
 
     /**

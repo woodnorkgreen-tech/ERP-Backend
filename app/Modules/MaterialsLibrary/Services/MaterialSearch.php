@@ -137,11 +137,7 @@ class MaterialSearch
 
         $results = [];
         foreach ($rows as $row) {
-            $code = mb_strtolower(trim((string) ($row['code'] ?? '')));
-            $name = $this->words((string) $row['name']);
-            $aliasWords = $this->words((string) ($row['aliases'] ?? ''));
-            $vocabulary = array_values(array_unique(array_merge($name, $aliasWords)));
-            $numbers = $this->numbers($name);
+            [$code, $name, $aliasWords, $vocabulary, $numbers] = $this->prepared($row);
             $specDiffers = $typedNumbers !== [] && $numbers !== [] && array_diff($typedNumbers, $numbers) !== [];
             $times = (int) ($history[$row['id']] ?? 0);
 
@@ -180,7 +176,18 @@ class MaterialSearch
                 continue;
             }
 
-            similar_text(implode(' ', $typed), implode(' ', $name), $percent);
+            // similar_text's percentage can never exceed 200·shorter/(both).
+            // Skip the expensive comparison only when that bound could change
+            // nothing: under 80 with too few words, or under the word share
+            // that already sets the score.
+            $percent = 0.0;
+            $typedText = implode(' ', $typed);
+            $nameText = implode(' ', $name);
+            $total = strlen($typedText) + strlen($nameText);
+            $bound = $total > 0 ? 200 * min(strlen($typedText), strlen($nameText)) / $total : 0;
+            if ($coverage >= 0.5 ? $bound > 100 * $coverage : $bound >= 80) {
+                similar_text($typedText, $nameText, $percent);
+            }
             if ($coverage >= 0.5 || $percent >= 80) {
                 $results[$row['id']] = $this->hit(
                     self::TIER_AMBIGUOUS,
@@ -194,6 +201,52 @@ class MaterialSearch
         uasort($results, fn ($a, $b) => $b['score'] <=> $a['score']);
 
         return array_slice($results, 0, $limit, true);
+    }
+
+    /**
+     * Score many descriptions against one catalogue (Report 79E: a project's
+     * unmatched lines). Exactly score() per term; the catalogue is split into
+     * words once and shared across the terms.
+     *
+     * @param  array<int, string>  $terms
+     * @param  array<string, array<int, int>>  $historyByTerm  past links per term
+     * @return array<string, array> score() result per term
+     */
+    public function scoreMany(array $terms, array $rows, array $historyByTerm = [], int $limit = 6): array
+    {
+        $results = [];
+        foreach ($terms as $term) {
+            $results[$term] = $this->score($term, $rows, $historyByTerm[$term] ?? [], $limit);
+        }
+
+        return $results;
+    }
+
+    /** @var array<string, array> catalogue rows already split into words, by content */
+    private array $prepared = [];
+
+    /**
+     * A catalogue row split into words once per instance. Report 79E: the
+     * issue sheet scores forty descriptions against the same 600 names, and
+     * re-splitting every name for every description was 9 ms a description.
+     * Keyed by content, so an edited name is split again.
+     */
+    private function prepared(array $row): array
+    {
+        $key = $row['id'].'|'.$row['name'].'|'.($row['code'] ?? '').'|'.($row['aliases'] ?? '');
+        if (isset($this->prepared[$key])) {
+            return $this->prepared[$key];
+        }
+        $name = $this->words((string) $row['name']);
+        $aliasWords = $this->words((string) ($row['aliases'] ?? ''));
+
+        return $this->prepared[$key] = [
+            mb_strtolower(trim((string) ($row['code'] ?? ''))),
+            $name,
+            $aliasWords,
+            array_values(array_unique(array_merge($name, $aliasWords))),
+            $this->numbers($name),
+        ];
     }
 
     /**
@@ -276,10 +329,14 @@ class MaterialSearch
         if (mb_strlen($typed) >= 2 && str_starts_with($candidate, $typed)) {
             return 0.9;
         }
-        $length = min(mb_strlen($typed), mb_strlen($candidate));
+        $typedLength = mb_strlen($typed);
+        $candidateLength = mb_strlen($candidate);
+        $length = min($typedLength, $candidateLength);
         $allowed = $length >= 7 ? 2 : ($length >= 4 ? 1 : 0);
 
-        return $allowed > 0 && levenshtein($typed, $candidate) <= $allowed ? 0.75 : 0.0;
+        // The edit distance is at least the length difference.
+        return $allowed > 0 && abs($typedLength - $candidateLength) <= $allowed
+            && levenshtein($typed, $candidate) <= $allowed ? 0.75 : 0.0;
     }
 
     /** Lower-case words, singular, aliases applied, unit noise kept as its own word. */

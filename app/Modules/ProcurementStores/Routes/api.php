@@ -58,9 +58,10 @@ Route::post('/consumable-units/{unit}/hold', [\App\Modules\ProcurementStores\Con
  * single receiving did.
  */
 Route::post('/check-in', [ProcurementStoresController::class, 'checkIn']);
-Route::post('/check-out', [ProcurementStoresController::class, 'checkOut']);
 Route::post('/batch-check-in', [ProcurementStoresController::class, 'batchCheckIn']);
-Route::post('/batch-check-out', [ProcurementStoresController::class, 'batchCheckOut']);
+// Report 79E: /check-out and /batch-check-out were retired. They issued
+// without the approved-requirement cap (one had no transaction at all) and no
+// screen called them. Every issue goes through POST /movements.
 Route::post('/update-settings', [ProcurementStoresController::class, 'updateStockSettings']);
 // One shelf decision applied to many materials — reorder level, bin, warehouse.
 Route::post('/bulk-stock-settings', [ProcurementStoresController::class, 'bulkStockSettings']);
@@ -87,6 +88,9 @@ Route::delete('/inventory-logs/{id}', [ProcurementStoresController::class, 'dest
 Route::post('/inventory-logs/{id}/reverse', [ProcurementStoresController::class, 'reverseLog']);
 Route::post('/inventory-logs/{inventoryLog}/link-project-material', [ProcurementStoresController::class, 'linkProjectMaterial']);
 // Report 78B: Resolve Material is identity/classification only.
+// Report 79E: the issue sheet (one read per project) and bulk match confirm.
+Route::get('/projects/{project}/issue-sheet', [\App\Modules\ProcurementStores\Controllers\ProjectIssueSheetController::class, 'show']);
+Route::post('/project-materials/resolve-batch', [\App\Modules\ProcurementStores\Controllers\ProjectIssueSheetController::class, 'resolveBatch']);
 Route::post('/project-materials/{elementMaterial}/resolve-catalogue', [ProjectMaterialResolutionController::class, 'resolve']);
 Route::get('/project-materials/{elementMaterial}/compatibility', [ProjectMaterialResolutionController::class, 'compatibility']);
 Route::get('/project-materials/{elementMaterial}/registration-candidates', [ProjectMaterialResolutionController::class, 'registrationCandidates']);

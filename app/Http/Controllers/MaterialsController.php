@@ -1325,23 +1325,7 @@ class MaterialsController extends Controller
     /** @return array<int, array{id: int, code: string, factor: float, basis: string}> */
     private function issueUnitsFor($line, $uomCodes): array
     {
-        $material = $line->libraryMaterial;
-        if (! $material || ! $material->base_uom_id) {
-            return [];
-        }
-        $base = (int) $material->base_uom_id;
-        $units = [$base => ['id' => $base, 'code' => (string) ($uomCodes[$base] ?? $material->unit_of_measure), 'factor' => 1.0, 'basis' => 'stock']];
-        foreach ($material->uomConversions as $conversion) {
-            if ((int) $conversion->to_uom_id !== $base || (float) $conversion->factor <= 0) continue;
-            $id = (int) $conversion->from_uom_id;
-            $units[$id] ??= ['id' => $id, 'code' => (string) ($uomCodes[$id] ?? '?'), 'factor' => (float) $conversion->factor, 'basis' => 'material'];
-        }
-        $lineUnit = (int) $line->requirement_uom_id;
-        if ($lineUnit && $line->requirement_base_factor !== null && (int) $line->requirement_base_uom_id === $base) {
-            $units[$lineUnit] ??= ['id' => $lineUnit, 'code' => (string) ($uomCodes[$lineUnit] ?? $line->unit_of_measurement), 'factor' => (float) $line->requirement_base_factor, 'basis' => 'line'];
-        }
-
-        return array_values($units);
+        return app(\App\Modules\ProcurementStores\Services\RequirementUnits::class)->issueUnits($line, $uomCodes);
     }
 
     /**
@@ -1384,6 +1368,10 @@ class MaterialsController extends Controller
                                 'libraryMaterialId' => $material->library_material_id,
                                 // Round-tripped untouched by the client: the identity it saw.
                                 'libraryMaterialIdBaseline' => $material->library_material_id,
+                                // Report 79E: the line keeps the words the author typed;
+                                // the catalogue item it is linked to is shown beside them.
+                                'libraryMaterialName' => $material->libraryMaterial?->material_name,
+                                'libraryMaterialCode' => $material->libraryMaterial?->material_code,
                                 'requirementDisposition' => $material->effectiveDisposition(),
                                 // Report 79C: the pending request this line waits on, with
                                 // a baseline the client round-trips untouched (like the

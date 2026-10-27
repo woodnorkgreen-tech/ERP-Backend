@@ -20,6 +20,16 @@ class ProcurementStoresServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../Config/procurement-stores.php', 'procurement-stores');
         $this->mergeConfigFrom(__DIR__.'/../Config/boards.php', 'boards');
+
+        // Report 79E (79D P2-1): one unit reader per request. Each new instance
+        // re-read units_of_measure, 299 times in one workflow summary (2.5 s).
+        // Dropped after every request so a long-lived process (and the test
+        // client) never reads a stale unit list.
+        $this->app->scoped(\App\Modules\ProcurementStores\Services\RequirementUnits::class);
+        \Illuminate\Support\Facades\Event::listen(
+            \Illuminate\Foundation\Http\Events\RequestHandled::class,
+            fn () => $this->app->forgetInstance(\App\Modules\ProcurementStores\Services\RequirementUnits::class),
+        );
     }
 
     /**

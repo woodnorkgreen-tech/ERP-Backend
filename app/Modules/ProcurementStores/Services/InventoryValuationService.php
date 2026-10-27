@@ -47,6 +47,34 @@ class InventoryValuationService
     }
 
     /**
+     * Report 79E: on hand, reserved and available to issue for one material —
+     * the one rule the inventory list and the project issue sheet both read.
+     * Boards count Available sheets (less soft reservations); rolls count
+     * their own units; everything else is the stock row less reservations.
+     *
+     * @param  object|null  $boardCount  this material's row from boardCounts()
+     * @return array{on_hand: float, reserved: float, available: float}
+     */
+    public function issuable(\App\Modules\MaterialsLibrary\Models\LibraryMaterial $material, ?object $boardCount = null, ?array $unitSummary = null): array
+    {
+        $bc = $material->isBoardTrackable() ? $boardCount : null;
+        $unitSummary ??= $material->isConsumableUnit()
+            ? app(\App\Modules\ProcurementStores\Services\ConsumableUnitService::class)->summary($material) : null;
+        $stock = $material->stock;
+        $reserved = (float) ($stock?->quantity_reserved ?? 0);
+
+        return [
+            'on_hand' => $bc
+                ? (float) $bc->in_stores_cnt
+                : ($unitSummary ? (float) $unitSummary['total_remaining'] : (float) ($stock?->quantity_on_hand ?? 0)),
+            'reserved' => $reserved,
+            'available' => $bc
+                ? max(0.0, (float) $bc->available_cnt - $reserved)
+                : ($unitSummary ? (float) $unitSummary['available_quantity'] : (float) ($stock ? ($stock->quantity_on_hand - $reserved) : 0)),
+        ];
+    }
+
+    /**
      * Every stocked material with its value.
      *
      * @return array{total: string, lines: Collection<int, array<string, mixed>>}
