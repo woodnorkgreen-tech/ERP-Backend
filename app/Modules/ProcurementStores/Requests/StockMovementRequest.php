@@ -103,6 +103,11 @@ class StockMovementRequest extends FormRequest
                 'lines.*.new_material.uom_conversions.*.from_uom_id' => 'required|integer|distinct|exists:units_of_measure,id',
                 'lines.*.new_material.uom_conversions.*.factor' => 'required|numeric|gt:0',
                 'lines.*.new_material.default_unit_cost' => 'nullable|numeric|min:0',
+                // Report 79C: similar items looked at, and why this is still new.
+                'lines.*.new_material.duplicate_review' => 'nullable|array',
+                'lines.*.new_material.duplicate_review.acknowledged' => 'nullable|array',
+                'lines.*.new_material.duplicate_review.acknowledged.*' => 'integer',
+                'lines.*.new_material.duplicate_review.reason' => 'nullable|string|max:500',
             ],
             'issue' => [
                 'lines.*.project_id' => 'nullable|exists:projects,id',

@@ -419,6 +419,15 @@ class ProjectMaterialResolution
         foreach ($waiting as $line) {
             $factor = data_get($line->source_metadata, 'material_request.factor');
             try {
+                // Report 79C: a line on a list not yet signed off was parked by
+                // its author in the BOM; it links under the Projects identity
+                // rules. A signed-off list links through Resolve's checks.
+                $line->loadMissing('element.taskMaterialsData');
+                if (! (bool) data_get($line->element?->taskMaterialsData?->project_info, 'approval_status.all_approved', false)) {
+                    $taskIds[] = $this->linkDraft($line, $material, $userId);
+                    $linked[] = (int) $line->id;
+                    continue;
+                }
                 $result = $this->link($line, (int) $material->id, $userId, 'Linked automatically when the requested material was activated.', $factor !== null ? (string) $factor : null, false);
                 $linked[] = (int) $line->id;
                 $taskIds[] = $result['task_id'];
@@ -431,6 +440,82 @@ class ProjectMaterialResolution
         $this->announce($taskIds);
 
         return ['linked' => $linked, 'skipped' => $skipped];
+    }
+
+    /**
+     * Report 79C: link a line parked on a draft list, now that its requested
+     * material is Active. Identity rules only (MaterialLineIdentity); the unit
+     * reading is taken later, when Stores resolves or issues it, as for any
+     * line the BOM author links directly.
+     */
+    private function linkDraft(ElementMaterial $line, LibraryMaterial $material, int $userId): ?int
+    {
+        return DB::transaction(function () use ($line, $material, $userId) {
+            $locked = ElementMaterial::with('element.taskMaterialsData')->lockForUpdate()->findOrFail($line->id);
+            if ($locked->library_material_id || (int) $locked->requested_material_id !== (int) $material->id
+                || $locked->requirement_disposition !== ElementMaterial::DISPOSITION_AWAITING_REGISTRATION) {
+                throw ValidationException::withMessages(['material_id' => 'This line is no longer waiting on this material.']);
+            }
+            $this->identity->assertCanBecome($locked, (int) $material->id, 'material_id');
+
+            $metadata = $locked->source_metadata ?? [];
+            $metadata['catalogue_resolutions'] = array_merge($metadata['catalogue_resolutions'] ?? [], [[
+                'library_material_id' => (int) $material->id,
+                'material_name' => $material->material_name,
+                'material_code' => $material->material_code,
+                'resolved_by' => $userId,
+                'resolved_at' => now()->toIso8601String(),
+                'note' => 'Linked automatically when the requested material was activated.',
+            ]]);
+            $metadata['material_request'] = array_merge($metadata['material_request'] ?? [], [
+                'outcome' => ['status' => 'Active', 'at' => now()->toIso8601String()],
+            ]);
+            $locked->forceFill([
+                'library_material_id' => $material->id,
+                'requirement_disposition' => null,
+                'source_metadata' => $metadata,
+            ])->save();
+            $data = $locked->element?->taskMaterialsData;
+            $data?->touch();
+
+            return $data?->enquiry_task_id ? (int) $data->enquiry_task_id : null;
+        });
+    }
+
+    /**
+     * Report 79C: the custodian did not approve a requested material (set it
+     * Inactive, Discontinued or Blocked, or deleted it). Lines waiting on it
+     * keep their requirement and return to "choose a material", with the
+     * outcome recorded so every screen can say why.
+     *
+     * @return array<int, int> ids of the lines released
+     */
+    public function releaseRejected(LibraryMaterial $material, string $status): array
+    {
+        $released = [];
+        $taskIds = [];
+        DB::transaction(function () use ($material, $status, &$released, &$taskIds) {
+            ElementMaterial::query()
+                ->with('element.taskMaterialsData')
+                ->where('requested_material_id', $material->id)
+                ->where('requirement_disposition', ElementMaterial::DISPOSITION_AWAITING_REGISTRATION)
+                ->whereNull('library_material_id')
+                ->lockForUpdate()
+                ->get()
+                ->each(function (ElementMaterial $line) use ($status, &$released, &$taskIds) {
+                    $metadata = $line->source_metadata ?? [];
+                    $metadata['material_request'] = array_merge($metadata['material_request'] ?? [], [
+                        'outcome' => ['status' => $status, 'at' => now()->toIso8601String()],
+                    ]);
+                    $line->forceFill(['requirement_disposition' => null, 'source_metadata' => $metadata])->save();
+                    $line->element?->taskMaterialsData?->touch();
+                    $released[] = (int) $line->id;
+                    $taskIds[] = $line->element?->taskMaterialsData?->enquiry_task_id;
+                });
+        });
+        $this->announce(array_filter($taskIds));
+
+        return $released;
     }
 
     /** Budget, procurement and planned cost carry line identity; refresh each list once. */
@@ -451,28 +536,11 @@ class ProjectMaterialResolution
      */
     public function requestNewMaterial(ElementMaterial $line, array $data, array $acknowledged, string $reason, int $userId): array
     {
-        $candidates = $this->duplicates->candidates((string) $data['material_name'], isset($data['material_category_id']) ? (int) $data['material_category_id'] : null);
-        $exact = $candidates->where('match', 'exact');
-        if ($exact->isNotEmpty()) {
-            throw ValidationException::withMessages([
-                'new_material.material_name' => "'{$exact->first()['name']}' ({$exact->first()['code']}) already exists in the Material Library. Match it instead of registering a duplicate.",
-            ])->status(422);
-        }
-        $unacknowledged = $candidates->pluck('id')->diff(array_map('intval', $acknowledged));
-        if ($unacknowledged->isNotEmpty()) {
-            $exception = ValidationException::withMessages([
-                'duplicate_candidates' => 'Similar Material Library items exist. Check each one; register a new item only if none of them is this material.',
-            ]);
-            $exception->response = response()->json([
-                'message' => 'Similar Material Library items exist. Check each one before requesting a new material.',
-                'code' => 'DUPLICATE_CANDIDATES',
-                'candidates' => $candidates->values(),
-                'errors' => ['duplicate_candidates' => ['Similar Material Library items exist.']],
-            ], 422);
-            throw $exception;
-        }
-
-        return DB::transaction(function () use ($line, $data, $acknowledged, $reason, $userId, $candidates) {
+        // Report 79C: the duplicate check is the registration service's own
+        // gate now (the same one every creation path passes), run after the
+        // category's defaults so the stock unit counts, and under a lock so two
+        // people asking for the same new material get one.
+        return DB::transaction(function () use ($line, $data, $acknowledged, $reason, $userId) {
             $locked = ElementMaterial::with('element.taskMaterialsData.task')->lockForUpdate()->findOrFail($line->id);
             $this->assertOpenForStores($locked);
             if ($locked->library_material_id) {
@@ -490,6 +558,7 @@ class ProjectMaterialResolution
             $material = app(MaterialRegistrationService::class)->create(
                 array_merge($data, ['item_status' => 'Under Review']),
                 $userId,
+                ['acknowledged' => $acknowledged, 'reason' => $reason, 'field' => 'new_material.material_name'],
             );
             $material->load(['uomConversions', 'baseUom']);
 
@@ -507,7 +576,7 @@ class ProjectMaterialResolution
                 'reason' => $reason,
                 'original' => ['description' => $locked->description, 'quantity' => (string) $locked->getRawOriginal('quantity'), 'unit' => $locked->unit_of_measurement],
                 'project' => $this->projectReference($locked),
-                'candidates_reviewed' => $candidates->map(fn ($c) => ['id' => $c['id'], 'name' => $c['name'], 'match' => $c['match']])->values()->all(),
+                'candidates_reviewed' => $material->registration_review['candidates_reviewed'] ?? [],
             ];
             $locked->forceFill([
                 'requirement_disposition' => ElementMaterial::DISPOSITION_AWAITING_REGISTRATION,

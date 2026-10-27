@@ -39,6 +39,87 @@ class AssetController extends Controller
     }
 
     /**
+     * Report 79B — what an asset picker offers.
+     *
+     * The hire-request forms used to load the first 200 available assets with
+     * no search, so asset #201 never appeared, and an asset marked Retired or
+     * In Repair but still flagged available was offered as ready. This is
+     * searched on the server (every typed word, any order), paged, and says
+     * of each asset whether it can be requested now and, if not, why. It only
+     * reads: choosing an asset creates nothing until a hire or assign request
+     * goes through its own approval.
+     */
+    public function options(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:100',
+            'offerable_only' => 'nullable|boolean',
+            'page' => 'nullable|integer|min:1',
+        ]);
+
+        $query = Asset::query()
+            ->active()
+            ->with(['assetCategory:id,name', 'assignee:id,name', 'activeHireRequest.forUser:id,name'])
+            ->withCount(['hireRequests as pending_requests_count' => fn ($q) => $q->where('status', \App\Modules\Assets\Models\AssetHireRequest::STATUS_PENDING)]);
+
+        $words = app(\App\Modules\MaterialsLibrary\Services\MaterialDuplicateFinder::class)
+            ->tokens((string) ($validated['search'] ?? ''));
+        foreach ($words as $word) {
+            $query->where(function ($match) use ($word) {
+                foreach (['name', 'asset_code', 'category', 'subcategory', 'location', 'serial_number', 'manufacturer', 'model'] as $column) {
+                    $match->orWhere($column, 'like', "%{$word}%");
+                }
+            });
+        }
+
+        if ($request->boolean('offerable_only')) {
+            $query->where('status', 'Active')->where('is_available', true);
+        }
+
+        $page = $query
+            // Ready to request first, then by name, so the useful rows lead.
+            ->orderByRaw("CASE WHEN status = 'Active' AND is_available = 1 THEN 0 ELSE 1 END")
+            ->orderBy('name')
+            ->orderBy('id')
+            ->paginate(20);
+
+        return response()->json([
+            'data' => collect($page->items())->map(fn (Asset $asset) => $this->option($asset))->values(),
+            'current_page' => $page->currentPage(),
+            'last_page' => $page->lastPage(),
+            'total' => $page->total(),
+        ]);
+    }
+
+    /** One picker row: identity, condition, whereabouts, and whether it can be requested now. */
+    private function option(Asset $asset): array
+    {
+        $holder = $asset->activeHireRequest?->forUser?->name ?? $asset->assignee?->name;
+        $reason = match (true) {
+            $asset->status !== 'Active' => "{$asset->status}: not in service",
+            ! $asset->is_available => $holder ? "Out with {$holder}" : 'Not available',
+            default => null,
+        };
+
+        return [
+            'id' => $asset->id,
+            'asset_code' => $asset->asset_code,
+            'name' => $asset->name,
+            'category' => $asset->assetCategory?->name ?? $asset->category,
+            'ownership_type' => $asset->ownership_type,
+            'status' => $asset->status,
+            'condition' => $asset->condition,
+            'is_available' => (bool) $asset->is_available,
+            'location' => $asset->location,
+            'holder' => $holder,
+            'expected_return_date' => $asset->activeHireRequest?->expected_return_date?->toDateString(),
+            'pending_requests' => (int) $asset->pending_requests_count,
+            'offerable' => $reason === null,
+            'unavailable_reason' => $reason,
+        ];
+    }
+
+    /**
      * Shared query builder used by index().
      */
     private function buildAssetQuery(Request $request)

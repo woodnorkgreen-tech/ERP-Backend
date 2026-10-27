@@ -167,7 +167,12 @@ class LogisticsTaskController extends Controller
                 'source' => 'nullable|string|max:100',
                 'weight' => 'nullable|string|max:50',
                 'special_handling' => 'nullable|string|max:500',
+                // Report 79C: optional link to a registered asset (Tools & Equipment only).
+                'asset_id' => 'nullable|integer|exists:assets,id',
             ]);
+            if (! empty($validated['asset_id']) && ($validated['main_category'] ?? 'TOOLS_EQUIPMENTS') !== 'TOOLS_EQUIPMENTS') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['asset_id' => 'Only a Tools & Equipment row can refer to a registered asset.']);
+            }
 
             // Set default category if not provided based on main_category
             if (empty($validated['category'])) {
@@ -213,7 +218,12 @@ class LogisticsTaskController extends Controller
                 'source' => 'nullable|string|max:100',
                 'weight' => 'nullable|string|max:50',
                 'special_handling' => 'nullable|string|max:500',
+                // Report 79C: optional link to a registered asset (Tools & Equipment only).
+                'asset_id' => 'nullable|integer|exists:assets,id',
             ]);
+            if (! empty($validated['asset_id']) && ($validated['main_category'] ?? \App\Modules\logisticsTask\Models\TransportItem::whereKey($itemId)->value('main_category')) !== 'TOOLS_EQUIPMENTS') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['asset_id' => 'Only a Tools & Equipment row can refer to a registered asset.']);
+            }
 
             // Set default category if not provided based on main_category
             if (isset($validated['main_category']) && empty($validated['category'])) {

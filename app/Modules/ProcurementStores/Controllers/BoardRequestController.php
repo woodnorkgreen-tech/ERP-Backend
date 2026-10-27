@@ -366,8 +366,14 @@ class BoardRequestController extends Controller
         // Advance the workflow: create Logistics dispatch task + notify
         $this->workflow->onRequestFulfilled($boardRequest, $boards);
 
+        // Report 79D: the board issue's own Finance outcome, not an assumption.
+        $posting = app(\App\Modules\ProcurementStores\Services\StoresPostingResult::class)->forLogs([$issueLog->id]);
+
         return response()->json([
-            'message' => "{$boards->count()} board(s) issued to job [{$boardRequest->job_ref}].",
+            'message' => trim("{$boards->count()} board(s) issued to job [{$boardRequest->job_ref}]. "
+                .app(\App\Modules\ProcurementStores\Services\StoresPostingResult::class)->sentence($posting['summary'])),
+            'posting' => $posting['lines'],
+            'posting_summary' => $posting['summary'],
             'boards_issued' => $boards->pluck('tracking_code'),
             'request' => $boardRequest->fresh(['material', 'requester']),
         ]);

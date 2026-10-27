@@ -468,11 +468,14 @@ class BoardLifecycleTest extends TestCase
         // fake the announcement and assert the board actually moves.
         Event::fake([\App\Events\Stores\StockIssued::class]);
 
-        $this->postJson("/api/procurement-stores/board-requests/{$request->id}/fulfil", [
+        $response = $this->postJson("/api/procurement-stores/board-requests/{$request->id}/fulfil", [
             'board_ids' => [$board->id],
         ])->assertStatus(200);
 
         $this->assertSame('Allocated', $board->fresh()->status);
+        // Report 79D: with no posting made, the response says so and claims no charge.
+        $response->assertJsonPath('posting.0.status', 'none')->assertJsonPath('posting_summary.posted', 0);
+        $this->assertStringNotContainsString('charged', $response->json('message'));
     }
 
     public function test_a_receipt_valuation_never_restates_a_board_that_already_has_one(): void

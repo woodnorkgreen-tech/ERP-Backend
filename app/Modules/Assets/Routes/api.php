@@ -46,6 +46,8 @@ Route::delete('/{id}/service-logs/{logId}', [AssetServiceLogController::class, '
 Route::get('/client-portal/clients', [AssetClientPortalController::class, 'clients']);
 Route::get('/client-portal/assets', [AssetClientPortalController::class, 'clientAssets']);
 
+// Report 79B: what an asset picker offers (searched, paged, says why an asset is not requestable).
+Route::get('/options', [AssetController::class, 'options']);
 Route::get('/trashed', [AssetController::class, 'trashed']);
 Route::post('/{id}/restore', [AssetController::class, 'restore']);
 Route::patch('/{id}/availability', [AssetController::class, 'toggleAvailability']);

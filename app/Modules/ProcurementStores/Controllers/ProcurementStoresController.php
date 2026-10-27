@@ -261,11 +261,6 @@ class ProcurementStoresController extends Controller
             $query->issuable();
         }
 
-        // Filter by Search Query
-        if ($request->filled('search')) {
-            $query->search($request->search);
-        }
-
         // Filter by Workstation
         if ($request->filled('workstation_id')) {
             $query->where('workstation_id', $request->workstation_id);
@@ -276,7 +271,17 @@ class ProcurementStoresController extends Controller
             $query->where('category', 'like', "%{$request->category}%");
         }
 
-        if ($request->input('selection_context') === 'project') {
+        // Report 79B: a search is ranked by how well each item matches what was
+        // typed (any word order, small typos, sizes respected), not filtered by
+        // one phrase LIKE. Applied after every other filter so it ranks only
+        // what this caller may see.
+        $searchRanking = $request->filled('search')
+            ? app(\App\Modules\MaterialsLibrary\Services\MaterialSearch::class)->apply($query, (string) $request->search)
+            : null;
+
+        if ($searchRanking !== null) {
+            // Ordered by match already.
+        } elseif ($request->input('selection_context') === 'project') {
             $query->orderByDesc('recent_project_issue_count')
                 ->orderByDesc('project_specification_count')
                 ->orderBy('library_materials.material_name');
@@ -412,9 +417,12 @@ class ProcurementStoresController extends Controller
             ];
         };
 
-        $paginator->getCollection()->transform(function ($material) use ($formatMaterial) {
+        $paginator->getCollection()->transform(function ($material) use ($formatMaterial, $searchRanking) {
             $row = $formatMaterial($material);
             unset($row['_stock_value']);
+            if ($searchRanking !== null) {
+                $row['match'] = $searchRanking[$material->id] ?? null;
+            }
 
             return $row;
         });

@@ -345,4 +345,42 @@ class ProjectMaterialIssueTest extends TestCase
         $this->assertSame(20.0, $this->onHand($good), 'The valid line must not survive its neighbour failing.');
         $this->assertSame(0, InventoryLog::count());
     }
+
+    /** Report 79D: the response says what Finance did, line by line. */
+    public function test_the_issue_response_reports_the_posted_cost_and_journal(): void
+    {
+        $material = $this->material('MDF 18mm', 20);
+        $planned = $this->specify($material, 12);
+
+        $response = $this->issue([$this->line($material, $planned, 8)])->assertOk();
+
+        $response->assertJsonPath('posting_summary.posted', 1)
+            ->assertJsonPath('posting_summary.failed', 0)
+            ->assertJsonPath('posting.0.status', 'posted');
+        $this->assertNotEmpty($response->json('posting.0.cost_line_ref'));
+        $this->assertNotEmpty($response->json('posting.0.journal_entry_no'));
+        $this->assertStringContainsString('1 charged to the project', $response->json('message'));
+    }
+
+    /**
+     * Report 79D: when the cost cannot be posted the stock has still moved; the
+     * response must say "not yet costed" with the reason, never "charged".
+     */
+    public function test_a_failed_posting_is_reported_not_hidden(): void
+    {
+        $material = $this->material('Unpriced glue', 20);
+        $material->forceFill(['unit_cost' => 0, 'default_unit_cost' => null])->save();
+        $planned = $this->specify($material, 5);
+
+        $response = $this->issue([$this->line($material, $planned, 2)])->assertOk();
+
+        $this->assertSame(18.0, $this->onHand($material), 'The stock left the shelf.');
+        $response->assertJsonPath('posting.0.status', 'failed')
+            ->assertJsonPath('posting_summary.failed', 1)
+            ->assertJsonPath('posting_summary.posted', 0);
+        $this->assertNotEmpty($response->json('posting.0.error'));
+        $this->assertStringContainsString('not yet costed', $response->json('message'));
+        $this->assertStringNotContainsString('charged to the project', $response->json('message'));
+        $this->assertSame('failed', DB::table('stores_finance_postings')->where('inventory_log_id', $response->json('posting.0.inventory_log_id'))->value('status'));
+    }
 }

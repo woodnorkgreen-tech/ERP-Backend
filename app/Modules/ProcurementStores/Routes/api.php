@@ -110,6 +110,8 @@ Route::post('/goods-receipt-inspections/{item}/resolve', [GoodsReceiptInspection
 // The catalogue lookup behind the requisition and order pickers. Authorised
 // like the requisition it feeds, not like the material library itself.
 Route::get('/material-options', [MaterialOptionsController::class, 'index']);
+// Report 79C: the duplicate verdict a creation form shows before saving.
+Route::get('/material-duplicates', [MaterialOptionsController::class, 'duplicates']);
 // The departments stock can be issued to for company use (Report 76A Part 2).
 Route::get('/cost-centre-options', [ProcurementStoresController::class, 'costCentreOptions']);
 

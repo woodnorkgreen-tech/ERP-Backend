@@ -110,7 +110,9 @@ class ElementMaterial extends Model
 
     public function requestedMaterial(): BelongsTo
     {
-        return $this->belongsTo(LibraryMaterial::class, 'requested_material_id');
+        // Report 79C: a requested item the custodian deleted still names what
+        // the line asked for.
+        return $this->belongsTo(LibraryMaterial::class, 'requested_material_id')->withTrashed();
     }
 
     public function element(): BelongsTo

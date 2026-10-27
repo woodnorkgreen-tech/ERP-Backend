@@ -51,11 +51,20 @@ class StockMovementController extends Controller
                         // Name the line that failed. Without this a fifteen-line
                         // receipt answers "quantity is required" and the person
                         // has to guess which row it meant.
-                        throw ValidationException::withMessages(
-                            collect($e->errors())
-                                ->mapWithKeys(fn ($messages, $field) => ["lines.{$index}.".$this->fieldOf($field) => $messages])
-                                ->all(),
-                        );
+                        $errors = collect($e->errors())
+                            ->mapWithKeys(fn ($messages, $field) => ["lines.{$index}.".$this->fieldOf($field) => $messages])
+                            ->all();
+                        $renamed = ValidationException::withMessages($errors);
+                        // Report 79C: keep the duplicate gate's verdict (code and
+                        // candidates) so the receiving screen can offer them.
+                        $body = $e->response?->getData(true) ?? [];
+                        if (isset($body['code'])) {
+                            $renamed->response = response()->json([
+                                'message' => $body['message'] ?? '', 'code' => $body['code'],
+                                'candidates' => $body['candidates'] ?? [], 'line' => $index, 'errors' => $errors,
+                            ], 422);
+                        }
+                        throw $renamed;
                     } catch (\DomainException $e) {
                         /*
                          * Refusals raised deeper than validation — an unfinished
@@ -81,11 +90,23 @@ class StockMovementController extends Controller
             return response()->json(['message' => $e->getMessage(), 'status' => 'error'], 422);
         }
 
+        // Report 79D: the transaction has committed and the outbox has run, so
+        // say what Finance actually did with each line instead of assuming it.
+        $posting = app(\App\Modules\ProcurementStores\Services\StoresPostingResult::class)
+            ->forLogs(array_map(fn ($log) => $log->id, $logs));
+        $postingSentence = in_array($type, ['issue', 'return'], true)
+            ? app(\App\Modules\ProcurementStores\Services\StoresPostingResult::class)->sentence($posting['summary'])
+            : '';
+
         return response()->json([
-            'message' => $this->summary($type, count($logs), count($boards)),
+            'message' => trim($this->summary($type, count($logs), count($boards)).' '.$postingSentence),
             'status' => 'success',
             'batch_number' => $batchNumber,
             'lines_posted' => count($logs),
+            // Per line: posted (cost line + journal), failed (reason), pending,
+            // not_applicable or none. Stock moved in every case.
+            'posting' => $posting['lines'],
+            'posting_summary' => $posting['summary'],
             'data' => $logs,
             'controlled_units' => \App\Modules\ProcurementStores\Models\ConsumableUnit::with('material')->whereIn('source_log_id', array_map(fn ($log) => $log->id, $logs))->orWhereIn('id', array_values(array_filter(array_map(fn ($log) => $log->type === 'return' ? $log->consumable_unit_id : null, $logs))))->get(),
             'boards_created' => count($boards),

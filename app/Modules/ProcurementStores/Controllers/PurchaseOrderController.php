@@ -66,6 +66,16 @@ class PurchaseOrderController extends Controller
             'requisition.project', 'requisition.department', 'requisition.projectEnquiry', 'requisition.employee',
         ]);
 
+        $searchTerm = trim((string) $request->input('searchTerm', ''));
+        $query->when($searchTerm !== '', function ($query) use ($searchTerm) {
+            $query->where(function ($query) use ($searchTerm) {
+                $query->where('po_number', 'LIKE', '%' . $searchTerm . '%')
+                    ->orWhereHas('supplier', function ($q) use ($searchTerm) {
+                        $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
+                    });
+            });
+        });
+
         // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
@@ -97,25 +107,7 @@ class PurchaseOrderController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = trim((string) $request->input('searchTerm', ''));
-        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
-
-        $purchaseOrders = PurchaseOrder::with([
-            'items.material', 'supplier', 'createdBy', 'approvedBy',
-            'requisition.project', 'requisition.department', 'requisition.projectEnquiry', 'requisition.employee',
-        ])
-            ->when($searchTerm !== '', function ($query) use ($searchTerm) {
-                $query->where(function ($query) use ($searchTerm) {
-                    $query->where('po_number', 'LIKE', '%' . $searchTerm . '%')
-                        ->orWhereHas('supplier', function ($q) use ($searchTerm) {
-                            $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
-                        });
-                });
-            })
-            ->orderBy('created_at', 'desc')
-            ->paginate($perPage);
-
-        return PurchaseOrderResource::collection($purchaseOrders)->preserveQuery();
+        return $this->index($request);
     }
 
     public function link(Requisition $requisition)

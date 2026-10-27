@@ -18,7 +18,7 @@ class LogisticsTaskService
     public function getLogisticsForTask(int $taskId): ?array
     {
         $logisticsTask = LogisticsTask::where('task_id', $taskId)
-            ->with(['transportItems', 'checklist.checklistItems', 'task.enquiry.projectOfficer'])
+            ->with(['transportItems.asset', 'checklist.checklistItems', 'task.enquiry.projectOfficer'])
             ->first();
 
         if (!$logisticsTask) {
@@ -84,6 +84,8 @@ class LogisticsTaskService
                     'source' => $item->source,
                     'weight' => $item->weight,
                     'special_handling' => $item->special_handling,
+                    'asset_id' => $item->asset_id,
+                    'asset' => $item->asset ? ['id' => $item->asset->id, 'asset_code' => $item->asset->asset_code, 'name' => $item->asset->name, 'status' => $item->asset->status, 'is_available' => (bool) $item->asset->is_available] : null,
                 ];
             })->toArray(),
             'checklist' => $this->formatChecklistData($logisticsTask->checklist->first()),
@@ -140,6 +142,8 @@ class LogisticsTaskService
                 'source' => $item->source,
                 'weight' => $item->weight,
                 'special_handling' => $item->special_handling,
+                'asset_id' => $item->asset_id,
+                'asset' => $item->asset ? ['id' => $item->asset->id, 'asset_code' => $item->asset->asset_code, 'name' => $item->asset->name, 'status' => $item->asset->status, 'is_available' => (bool) $item->asset->is_available] : null,
             ];
         })->toArray();
     }
@@ -161,7 +165,7 @@ class LogisticsTaskService
             return $logisticsTask->transportItems()->create([
                 ...$data,
                 'created_by' => auth()->id(),
-            ]);
+            ])->load('asset');
         });
     }
 
@@ -174,7 +178,7 @@ class LogisticsTaskService
             ->whereHas('logisticsTask', fn ($query) => $query->where('task_id', $taskId))
             ->firstOrFail();
         $item->update($data);
-        return $item->fresh();
+        return $item->fresh('asset');
     }
 
     /**

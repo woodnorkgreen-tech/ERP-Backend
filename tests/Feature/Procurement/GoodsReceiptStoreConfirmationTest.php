@@ -342,4 +342,24 @@ class GoodsReceiptStoreConfirmationTest extends TestCase
         $this->assertSame('posted', $line->stock_status);
         $this->assertSame(5.0, (float) DB::table('stocks')->where('material_id', $material->id)->value('quantity_on_hand'));
     }
+
+    /** Report 79C: the confirm screen registers through the same duplicate gate. */
+    public function test_the_confirm_screen_cannot_register_a_duplicate(): void
+    {
+        $existing = LibraryMaterial::create([
+            'material_name' => 'Contact Adhesive 1L', 'material_code' => 'ADH-'.uniqid(),
+            'material_type' => 'consumable', 'unit_of_measure' => 'l', 'item_status' => 'Active', 'is_active' => true,
+        ]);
+        $line = $this->pendingLine(null, stockStatus: 'not_stocked');
+
+        $this->postJson("/api/procurement-stores/goods-receipt-note-items/{$line->id}/confirm", [
+            'new_material' => ['material_name' => 'contact adhesive 1l', 'unit_of_measure' => 'l', 'material_type' => 'consumable'],
+            'unit_price' => 900,
+        ])->assertStatus(422)
+            ->assertJsonPath('code', 'DUPLICATE_EXISTS')
+            ->assertJsonPath('candidates.0.id', $existing->id);
+
+        $this->assertNull($line->fresh()->material_id, 'Nothing is confirmed into stock.');
+        $this->assertSame(1, LibraryMaterial::where('material_name', 'like', 'contact adhesive%')->count());
+    }
 }

@@ -249,6 +249,17 @@ class GoodsReceiptNoteController extends Controller
             'receivedByUser'
         ]);
 
+        $searchTerm = trim((string) $request->input('searchTerm', ''));
+        $query->when($searchTerm !== '', function ($query) use ($searchTerm) {
+            $query->where(function ($query) use ($searchTerm) {
+                $query->where('grn_number', 'LIKE', '%' . $searchTerm . '%')
+                    ->orWhere('batch_number', 'LIKE', '%' . $searchTerm . '%')
+                    ->orWhereHas('purchaseOrder', function ($q) use ($searchTerm) {
+                        $q->where('po_number', 'LIKE', '%' . $searchTerm . '%');
+                    });
+            });
+        });
+
         // Date filtering
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
@@ -284,28 +295,7 @@ class GoodsReceiptNoteController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = $request->input('searchTerm');
-
-        $grns = GoodsReceiptNote::with([
-            'items.purchaseOrderItem.material',
-            'purchaseOrder.supplier',
-            'purchaseOrder.requisition.project',
-            'purchaseOrder.requisition.department',
-            'purchaseOrder.requisition.projectEnquiry',
-            'purchaseOrder.requisition.employee',
-            'receivedByUser'
-        ])
-            ->where(function ($query) use ($searchTerm) {
-                $query->where('grn_number', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhere('batch_number', 'LIKE', '%' . $searchTerm . '%')
-                    ->orWhereHas('purchaseOrder', function ($q) use ($searchTerm) {
-                        $q->where('po_number', 'LIKE', '%' . $searchTerm . '%');
-                    });
-            })
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
-
-        return GoodsReceiptNoteResource::collection($grns)->preserveQuery();
+        return $this->index($request);
     }
 
     public function show($id)
@@ -712,6 +702,11 @@ class GoodsReceiptNoteController extends Controller
             'new_material.unit_of_measure' => 'required_with:new_material|string|max:50',
             'new_material.material_type' => 'required_with:new_material|string|max:50',
             'new_material.category' => 'nullable|string|max:100',
+            'new_material.material_category_id' => 'nullable|integer|exists:material_categories,id',
+            'new_material.duplicate_review' => 'nullable|array',
+            'new_material.duplicate_review.acknowledged' => 'nullable|array',
+            'new_material.duplicate_review.acknowledged.*' => 'integer',
+            'new_material.duplicate_review.reason' => 'nullable|string|max:500',
             'unit_price' => 'nullable|numeric|min:0',
         ]);
 
@@ -751,19 +746,35 @@ class GoodsReceiptNoteController extends Controller
             $materialId = $request->input('material_id');
 
             if (!$materialId) {
-                // Registered on the spot, from the receipt screen — Stores is
-                // vouching for it right now, so it goes straight to Active
-                // rather than the catalogue's usual 'Under Review' default,
-                // which adjustStock() would otherwise refuse to receive against.
-                // material_code is a required, unique column that this form
-                // never asks for, so one is minted the same way the governed
-                // registration flow does for a code-less item.
-                $material = LibraryMaterial::create([
-                    ...$request->input('new_material'),
-                    'material_code' => $request->input('new_material.material_code')
-                        ?: app(\App\Modules\MaterialsLibrary\Services\MaterialDefaultsService::class)->suggestDraftCode(),
-                    'item_status' => 'Active',
+                // Report 79C: an ordered line without a catalogue item is a
+                // free-text requisition line in a stock category. Matching it to
+                // the existing item is the normal answer; registering a new one
+                // goes through the same registration service and duplicate gate
+                // as every other door, and — as Receive Stock already requires —
+                // must come out Active to be taken into stock. It used to be
+                // inserted as Active straight from the request, skipping the
+                // category defaults, the completeness rule and any duplicate check.
+                $input = (array) $request->input('new_material');
+                $defaults = app(\App\Modules\MaterialsLibrary\Services\MaterialDefaultsService::class);
+                $material = app(\App\Modules\MaterialsLibrary\Services\MaterialRegistrationService::class)->create(array_filter([
+                    'material_name' => $input['material_name'] ?? null,
+                    'material_code' => $input['material_code'] ?? null,
+                    'material_category_id' => $input['material_category_id'] ?? null,
+                    'category' => $input['category'] ?? null,
+                    'material_type' => $input['material_type'] ?? null,
+                    'unit_of_measure' => $input['unit_of_measure'] ?? null,
+                    'base_uom_id' => $defaults->resolveUomId($input['unit_of_measure'] ?? null),
+                ], fn ($value) => $value !== null && $value !== ''), (int) auth()->id(), [
+                    'acknowledged' => (array) ($input['duplicate_review']['acknowledged'] ?? []),
+                    'reason' => $input['duplicate_review']['reason'] ?? null,
+                    'field' => 'new_material.material_name',
                 ]);
+                if ($material->item_status !== 'Active') {
+                    $missing = implode(', ', array_values(\App\Modules\MaterialsLibrary\Support\MaterialCompleteness::missing($material)));
+                    throw ValidationException::withMessages([
+                        'new_material.material_name' => "'{$material->material_name}' needs more detail before stock can be received against it — still missing: {$missing}. Register it fully in the Material Catalogue, then match this line to it.",
+                    ]);
+                }
                 $materialId = $material->id;
             }
 
@@ -814,7 +825,8 @@ class GoodsReceiptNoteController extends Controller
             ]));
         } catch (ValidationException $e) {
             DB::rollBack();
-            return response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
+            // Report 79C: the duplicate gate's own answer (code + candidates).
+            return $e->response ?? response()->json(['message' => $e->getMessage(), 'errors' => $e->errors()], 422);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Error confirming item: ' . $e->getMessage()], 500);

@@ -203,6 +203,16 @@ class ProjectElementRegistry
             $libraryMaterialId = $line->exists ? $identity->effectiveId($line, $input)
                 : (array_key_exists('libraryMaterialId', $input) && filled($input['libraryMaterialId']) ? (int) $input['libraryMaterialId'] : null);
             $previousId = $line->library_material_id ? (int) $line->library_material_id : null;
+
+            // Report 79C: an item still Under Review is not a catalogue identity
+            // yet. Choosing one parks the line on it — the pending reference
+            // Resolve already uses — and activation links it (linkAwaiting).
+            $parkOn = null;
+            if ($libraryMaterialId !== null && $libraryMaterialId !== $previousId
+                && \App\Modules\MaterialsLibrary\Models\LibraryMaterial::whereKey($libraryMaterialId)->value('item_status') === 'Under Review') {
+                $parkOn = $libraryMaterialId;
+                $libraryMaterialId = null;
+            }
             if ($line->exists && $libraryMaterialId !== $previousId) {
                 $identity->assertCanBecome($line, $libraryMaterialId, 'materials');
             }
@@ -213,8 +223,19 @@ class ProjectElementRegistry
                 $line->forceFill(\App\Modules\ProcurementStores\Services\RequirementUnits::clearedSnapshot());
             }
             if ($libraryMaterialId !== null) {
-                // An identity supersedes any Stores classification of the unlinked line.
-                $line->forceFill(['requirement_disposition' => null]);
+                // An identity supersedes any Stores classification of the unlinked
+                // line, and any pending request it was waiting on.
+                $line->forceFill(['requirement_disposition' => null, 'requested_material_id' => null]);
+            } elseif ($parkOn !== null) {
+                $line->forceFill([
+                    'requirement_disposition' => ElementMaterial::DISPOSITION_AWAITING_REGISTRATION,
+                    'requested_material_id' => $parkOn,
+                ]);
+            } elseif ($this->clearsPendingRequest($line, $input)) {
+                // The author changed what this line asks for, on a screen that
+                // had seen the pending request. A stale screen or an old draft
+                // (baseline differs, or no key at all) never clears it.
+                $line->forceFill(['requirement_disposition' => null, 'requested_material_id' => null]);
             }
 
             $line->fill([
@@ -229,6 +250,16 @@ class ProjectElementRegistry
                 'source_metadata' => $this->mergeSourceMetadata($line->source_metadata, $input['sourceMetadata'] ?? null),
                 'sort_order' => $input['sortOrder'] ?? $index, 'archived_at' => null,
             ]);
+            if ($parkOn !== null) {
+                $metadata = $line->source_metadata ?? [];
+                $metadata['material_request'] = [
+                    'requested_material_id' => $parkOn,
+                    'requested_by' => auth()->id(),
+                    'requested_at' => now()->toIso8601String(),
+                    'source' => 'bom',
+                ];
+                $line->source_metadata = $metadata;
+            }
             $line->save();
             $kept[] = $line->id;
         }
@@ -236,6 +267,18 @@ class ProjectElementRegistry
         $removed = $element->materials()->whereNotIn('id', $kept)->get();
         $removed->each(fn (ElementMaterial $line) => app(MaterialLineIdentity::class)->assertRemovable($line));
         $element->materials()->whereNotIn('id', $kept)->delete();
+    }
+
+    /** Report 79C: a deliberate clear of a pending request, by a client that saw it. */
+    private function clearsPendingRequest(ElementMaterial $line, array $input): bool
+    {
+        if (! $line->exists || ! $line->requested_material_id
+            || $line->requirement_disposition !== ElementMaterial::DISPOSITION_AWAITING_REGISTRATION
+            || ! array_key_exists('requestedMaterialId', $input) || filled($input['requestedMaterialId'])) {
+            return false;
+        }
+
+        return (int) ($input['requestedMaterialIdBaseline'] ?? 0) === (int) $line->requested_material_id;
     }
 
     /** Keys Stores writes onto a line; a materials-list save never removes them. */

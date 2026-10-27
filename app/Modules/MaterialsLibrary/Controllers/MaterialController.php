@@ -10,6 +10,7 @@ use App\Modules\MaterialsLibrary\Requests\UpdateMaterialRequest;
 use App\Modules\MaterialsLibrary\Resources\LibraryMaterialResource;
 use App\Modules\MaterialsLibrary\Services\MaterialDefaultsService;
 use App\Modules\MaterialsLibrary\Services\MaterialRegistrationService;
+use App\Modules\MaterialsLibrary\Services\MaterialSearch;
 use App\Modules\MaterialsLibrary\Support\MaterialCompleteness;
 use App\Modules\MaterialsLibrary\Support\MaterialControl;
 use App\Modules\MaterialsLibrary\Support\MaterialFieldSync;
@@ -24,6 +25,33 @@ use Illuminate\Validation\ValidationException;
 
 class MaterialController extends Controller
 {
+    /** Report 79B: how each row matched the search, set by buildMaterialQuery(). */
+    private ?array $searchRanking = null;
+
+    /** Refuse only an exact duplicate (Report 79C); similar names stay allowed on edit. */
+    private function assertNotAnExactDuplicate(LibraryMaterial $material, array $proposed, string $field): void
+    {
+        $check = app(\App\Modules\MaterialsLibrary\Services\MaterialDuplicateGuard::class)->check($proposed, (int) $material->id);
+        if ($check['exact'] === []) {
+            return;
+        }
+        $first = $check['exact'][0];
+        $message = "'{$first['name']}' ({$first['code']}) already exists with the same name and stock unit. Use that item, or name this one differently.";
+        $exception = ValidationException::withMessages([$field => $message]);
+        $exception->response = response()->json(['message' => $message, 'code' => 'DUPLICATE_EXISTS', 'candidates' => $check['exact'], 'errors' => [$field => [$message]]], 422);
+        throw $exception;
+    }
+
+    /** Add the match explanation to a row when the list was searched. */
+    private function withMatch(array $row, int $id): array
+    {
+        if ($this->searchRanking !== null) {
+            $row['match'] = $this->searchRanking[$id] ?? null;
+        }
+
+        return $row;
+    }
+
     /**
      * Display a listing of the materials.
      */
@@ -32,7 +60,7 @@ class MaterialController extends Controller
         $materials = $this->buildMaterialQuery($request)->paginate($request->get('per_page', 50));
         $materials->setCollection(
             $materials->getCollection()
-                ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
+                ->map(fn (LibraryMaterial $material) => $this->withMatch((new LibraryMaterialResource($material))->resolve($request), $material->id))
         );
         
         $stats = $this->catalogueStats();
@@ -81,7 +109,7 @@ class MaterialController extends Controller
             ->paginate($request->get('per_page', 50));
         $materials->setCollection(
             $materials->getCollection()
-                ->map(fn (LibraryMaterial $material) => (new LibraryMaterialResource($material))->resolve($request))
+                ->map(fn (LibraryMaterial $material) => $this->withMatch((new LibraryMaterialResource($material))->resolve($request), $material->id))
         );
 
         return response()->json(array_merge(
@@ -143,10 +171,6 @@ class MaterialController extends Controller
             $query->boardTrackable();
         }
 
-        if ($request->filled('search')) {
-            $query->search((string) $request->search);
-        }
-
         // Availability intent. "issuable" is for pickers behind an action that
         // consumes stock; every other picker (planning, requisitions, purchase
         // orders, receiving, opening inventory) must keep seeing the whole
@@ -206,6 +230,12 @@ class MaterialController extends Controller
             });
         }
 
+        // Report 79B: a search is ranked by how well each item matches, not
+        // filtered by one phrase LIKE. An explicit column sort still wins.
+        $this->searchRanking = $request->filled('search')
+            ? app(MaterialSearch::class)->apply($query, (string) $request->search, 500, order: ! $request->filled('sort_by'))
+            : null;
+
         // Sorting
         if ($request->filled('sort_by')) {
             $sortBy = $request->sort_by;
@@ -232,7 +262,7 @@ class MaterialController extends Controller
                     $query->latest('library_materials.created_at');
                 }
             }
-        } else {
+        } elseif ($this->searchRanking === null) {
             $query->latest('library_materials.created_at');
         }
 
@@ -245,7 +275,10 @@ class MaterialController extends Controller
      */
     public function store(StoreMaterialRequest $request, MaterialRegistrationService $registration): JsonResponse
     {
-        $material = $registration->create($request->validated(), auth()->id());
+        $validated = $request->validated();
+        $review = (array) ($validated['duplicate_review'] ?? []);
+        unset($validated['duplicate_review']);
+        $material = $registration->create($validated, auth()->id(), $review);
         $material->load('stock', 'materialCategory.parent', 'uomConversions');
 
         return response()->json([
@@ -273,14 +306,17 @@ class MaterialController extends Controller
      */
     public function bulkStore(\App\Modules\MaterialsLibrary\Requests\BulkStoreMaterialRequest $request, MaterialRegistrationService $registration): JsonResponse
     {
-        $shared = $request->safe()->except('variants');
+        $shared = $request->safe()->except('variants', 'duplicate_review');
+        // Report 79C: one review for the batch — the similar items looked at
+        // and why these variants are still different materials.
+        $review = (array) $request->input('duplicate_review', []);
         $variants = $request->input('variants');
         $userId = auth()->id();
 
         $created = [];
         $failed = [];
 
-        DB::transaction(function () use ($shared, $variants, $registration, $userId, &$created, &$failed) {
+        DB::transaction(function () use ($shared, $variants, $registration, $userId, $review, &$created, &$failed) {
             foreach ($variants as $variant) {
                 $label = trim((string) $variant['label']);
                 $data = $shared;
@@ -290,13 +326,23 @@ class MaterialController extends Controller
                 }
 
                 try {
-                    $material = $registration->create($data, $userId);
+                    $material = $registration->create($data, $userId, $review + ['siblings' => array_column($created, 'id')]);
                     $created[] = [
                         'id' => $material->id,
                         'material_name' => $material->material_name,
                         'material_code' => $material->material_code,
                         'item_status' => $material->item_status,
                     ];
+                } catch (ValidationException $e) {
+                    // The duplicate gate's verdict travels with the row, so the
+                    // screen can offer "use existing" or ask for a reason.
+                    $body = $e->response?->getData(true) ?? [];
+                    $failed[] = array_filter([
+                        'label' => $label,
+                        'error' => $body['message'] ?? collect($e->errors())->flatten()->first() ?? $e->getMessage(),
+                        'code' => $body['code'] ?? null,
+                        'candidates' => $body['candidates'] ?? null,
+                    ], fn ($value) => $value !== null);
                 } catch (\Throwable $e) {
                     $failed[] = ['label' => $label, 'error' => $e->getMessage()];
                 }
@@ -650,6 +696,21 @@ class MaterialController extends Controller
             ]);
         }
 
+        // Report 79C: a rename (or a new stock unit) must not turn this item
+        // into an exact duplicate of another. Other edits are never blocked,
+        // so the existing same-name groups can still be maintained.
+        $nextName = $data['material_name'] ?? $material->material_name;
+        $identityChanged = app(MaterialSearch::class)->identityKey($nextName) !== app(MaterialSearch::class)->identityKey((string) $material->material_name)
+            || (array_key_exists('base_uom_id', $data) && (int) $data['base_uom_id'] !== (int) $material->base_uom_id);
+        if ($identityChanged) {
+            $this->assertNotAnExactDuplicate($material, [
+                'material_name' => $nextName,
+                'base_uom_id' => $data['base_uom_id'] ?? $material->base_uom_id,
+                'material_category_id' => $data['material_category_id'] ?? $material->material_category_id,
+                'attributes' => $data['attributes'] ?? $material->attributes,
+            ], 'material_name');
+        }
+
         $nextBaseUomId = $data['base_uom_id'] ?? $material->base_uom_id;
         if ((int) $nextBaseUomId !== (int) $material->base_uom_id
             && InventoryLog::where('material_id', $material->id)->exists()) {
@@ -742,6 +803,15 @@ class MaterialController extends Controller
     public function restore($id): JsonResponse
     {
         $material = LibraryMaterial::withTrashed()->findOrFail($id);
+        // Report 79C: an item registered since this one was deleted may now
+        // be the same material; restoring would make two.
+        $this->assertNotAnExactDuplicate($material, [
+            'material_name' => $material->material_name,
+            'base_uom_id' => $material->base_uom_id,
+            'unit_of_measure' => $material->unit_of_measure,
+            'material_category_id' => $material->material_category_id,
+            'attributes' => $material->attributes,
+        ], 'restore');
         $material->restore();
 
         return response()->json([

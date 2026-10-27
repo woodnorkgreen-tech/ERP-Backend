@@ -122,9 +122,11 @@ class Asset extends Model
      */
     public function activeHireRequest(): HasOne
     {
+        // The status belongs inside ofMany(). Written as where()->latestOfMany(),
+        // the latest request of ANY status was picked first and then filtered,
+        // so a newer pending request hid the person actually holding the asset.
         return $this->hasOne(AssetHireRequest::class)
-            ->where('status', AssetHireRequest::STATUS_APPROVED)
-            ->latestOfMany();
+            ->ofMany(['id' => 'max'], fn ($query) => $query->where('status', AssetHireRequest::STATUS_APPROVED));
     }
 
     public function assignmentHistory(): HasMany

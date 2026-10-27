@@ -241,12 +241,28 @@ class MaterialImportService
         $materialData['is_active'] = $materialData['item_status'] === 'Active';
         $materialData['updated_by'] = auth()->id();
 
+        // Report 79C: imports pass the same duplicate gate as every other way
+        // in. A row that is an exact duplicate (same name and stock unit) of
+        // an existing item under another code is refused as a row error; a
+        // similar one imports, with the look-alikes recorded on it.
+        $guard = app(MaterialDuplicateGuard::class);
+        $importReview = ['automatic_reason' => 'Imported from a spreadsheet while similar items existed.'];
+
         if ($material) {
+            if ($guard->check([...$materialData, 'material_name' => $materialData['material_name'] ?? $material->material_name], (int) $material->id)['exact'] !== []
+                && app(MaterialSearch::class)->identityKey((string) ($materialData['material_name'] ?? $material->material_name)) !== app(MaterialSearch::class)->identityKey((string) $material->material_name)) {
+                throw new \RuntimeException("Renaming {$material->material_code} would duplicate an existing item with the same name and stock unit.");
+            }
             $material->update($materialData);
             $results['updated']++;
         } else {
-            $materialData['created_by'] = auth()->id();
-            LibraryMaterial::create($materialData);
+            $guard->withLock((string) ($materialData['material_name'] ?? ''), function () use ($guard, $materialData, $importReview) {
+                $review = $guard->assertCanRegister($materialData, $importReview);
+                $materialData['created_by'] = auth()->id();
+                $created = new LibraryMaterial($materialData);
+                $created->registration_review = $review;
+                $created->save();
+            });
             $results['created']++;
         }
 

@@ -69,6 +69,25 @@ class MaterialPickerTest extends TestCase
      * read the catalogue it draws from. Gating this on materials_library.view
      * left most requesters with a picker that silently returned nothing.
      */
+    public function test_newly_registered_material_can_be_selected_by_id_without_stock(): void
+    {
+        $material = $this->material('New plywood sheet', 3200, onHand: null);
+        $this->getJson(self::ENDPOINT.'?material_id='.$material->id)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $material->id)
+            ->assertJsonPath('data.0.available', fn ($available) => (float) $available === 0.0);
+        $this->assertDatabaseMissing('stocks', ['material_id' => $material->id]);
+    }
+
+    public function test_lookup_by_id_still_excludes_materials_awaiting_review(): void
+    {
+        $material = $this->material('Incomplete plywood sheet', 3200, onHand: null);
+        $material->update(['item_status' => 'Under Review']);
+        $this->getJson(self::ENDPOINT.'?material_id='.$material->id)
+            ->assertOk()->assertJsonCount(0, 'data');
+    }
+
     public function test_anyone_who_may_raise_a_requisition_can_read_the_catalogue(): void
     {
         $this->material('Picker Plywood Sheet', 3200, onHand: null);

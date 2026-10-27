@@ -121,7 +121,7 @@ class RequisitionController extends Controller
     public function index(Request $request)
     {
         $query = Requisition::with([
-            'items.material', 'items.supplier', 'items.expenseCode',
+            'items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders',
             'project.enquiry',
             'project',
             'projectEnquiry',
@@ -185,7 +185,7 @@ class RequisitionController extends Controller
         $searchTerm = $request->input('searchTerm', '');
 
         $query = Requisition::with([
-            'items.material', 'items.supplier', 'items.expenseCode',
+            'items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders',
             'project.enquiry',
             'project',
             'projectEnquiry',
@@ -416,7 +416,7 @@ class RequisitionController extends Controller
             $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
-                $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
+                $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
             );
 
         } catch (\Exception $e) {
@@ -428,7 +428,7 @@ class RequisitionController extends Controller
     public function show(Requisition $requisition)
     {
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy'])
         );
     }
 
@@ -551,7 +551,7 @@ class RequisitionController extends Controller
             $this->syncProjectProcurement($requisition);
 
             return new RequisitionResource(
-                $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
+                $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders', 'project', 'projectEnquiry', 'employee', 'department', 'createdBy', 'approvedBy'])
             );
 
         } catch (\Exception $e) {
@@ -597,7 +597,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 
@@ -647,7 +647,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 
@@ -805,7 +805,7 @@ class RequisitionController extends Controller
         $this->syncProjectProcurement($requisition);
 
         return new RequisitionResource(
-            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
+            $requisition->load(['items.material', 'items.supplier', 'items.expenseCode', 'items.purchaseOrderItems', 'purchaseOrders', 'project', 'employee', 'department', 'createdBy', 'approvedBy'])
         );
     }
 }

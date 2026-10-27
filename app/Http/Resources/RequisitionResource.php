@@ -86,12 +86,26 @@ class RequisitionResource extends JsonResource
              * resource for "this is the full view of one requisition".
              */
             'settlements' => $this->whenLoaded('items', fn () => $this->settlements()),
-            // Add purchase order info
-            'purchaseOrder' => $this->when($this->purchaseOrder, function () {
+            // Keep the singular contract for older consumers; expose every supplier order.
+            'purchase_order_id' => $this->purchaseOrders->first()?->id,
+            'purchaseOrder' => $this->purchaseOrders->first()?->only(['id', 'po_number', 'status']),
+            'purchase_order' => $this->purchaseOrders->first()?->only(['id', 'po_number', 'status']),
+            'purchase_orders' => $this->purchaseOrders->map(fn ($order) => [
+                'id' => $order->id,
+                'po_number' => $order->po_number,
+                'status' => $order->status,
+            ]),
+            'ordering' => $this->whenLoaded('items', function () {
+                $total = $this->items->count();
+                $ordered = $this->items->filter(fn ($item) => $item->purchaseOrderItems->isNotEmpty())->count();
+                // Older orders may predate line-level traceability. Treat them as linked,
+                // rather than offering to order the same requisition again.
+                $legacy = $this->purchaseOrders->isNotEmpty() && $ordered === 0;
                 return [
-                    'id' => $this->purchaseOrder->id,
-                    'po_number' => $this->purchaseOrder->po_number,
-                    'status' => $this->purchaseOrder->status,
+                    'status' => $legacy || ($total > 0 && $ordered === $total)
+                        ? 'ordered' : ($ordered > 0 ? 'partial' : 'not_ordered'),
+                    'ordered_lines' => $legacy ? $total : $ordered,
+                    'remaining_lines' => $legacy ? 0 : $total - $ordered,
                 ];
             }),
             'submitted_at' => $this->submitted_at?->format('Y-m-d H:i:s'),

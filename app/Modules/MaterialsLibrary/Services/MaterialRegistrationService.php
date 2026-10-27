@@ -29,8 +29,10 @@ class MaterialRegistrationService
     private bool $uncategorizedIdResolved = false;
     private ?int $uncategorizedId = null;
 
-    public function __construct(private readonly MaterialDefaultsService $defaults)
-    {
+    public function __construct(
+        private readonly MaterialDefaultsService $defaults,
+        private readonly ?MaterialDuplicateGuard $duplicates = null,
+    ) {
     }
 
     /**
@@ -38,9 +40,23 @@ class MaterialRegistrationService
      *                                       shape, or the narrower subset a quick
      *                                       create supplies: material_name +
      *                                       material_category_id + attributes).
+     * @param  array{acknowledged?: array<int,int>, reason?: ?string, automatic_reason?: ?string}  $review
+     *         Report 79C: the duplicate review the person did. Every creation
+     *         passes the same gate; an exact duplicate is always refused, a
+     *         similar one needs each candidate acknowledged and a reason.
      */
-    public function create(array $data, int $userId): LibraryMaterial
+    public function create(array $data, int $userId, array $review = []): LibraryMaterial
     {
+        $guard = $this->duplicates ?? app(MaterialDuplicateGuard::class);
+
+        // Checked and created while no other request can register the same
+        // identity, so two people naming the same new item at once get one.
+        return $guard->withLock((string) ($data['material_name'] ?? ''), fn () => $this->register($data, $userId, $review, $guard));
+    }
+
+    private function register(array $data, int $userId, array $review, MaterialDuplicateGuard $guard): LibraryMaterial
+    {
+        unset($data['duplicate_review']);
         $conversions = $data['uom_conversions'] ?? [];
         unset($data['uom_conversions']);
         $data['created_by'] = $userId;
@@ -90,8 +106,13 @@ class MaterialRegistrationService
 
         $data = MaterialFieldSync::syncCategoryStrings($data);
 
+        // After the defaults: the stock unit the category gives is part of
+        // what identifies the material (Masking Tape 24mm in pcs vs rolls).
+        $registrationReview = $guard->assertCanRegister($data, $review);
+
         $requestedStatus = $data['item_status'] ?? null;
         $material = new LibraryMaterial($data);
+        $material->registration_review = $registrationReview;
         $material->setRelation('materialCategory', $category);
 
         // Anything short of the full governance set is born under review:

@@ -18,6 +18,8 @@ class TransportItem extends Model
         'unit',
         'category',
         'main_category',
+        // Report 79C: the registered asset a Tools & Equipment row refers to.
+        'asset_id',
         'is_returnable',
         'sub_type',
         'element_category',
@@ -35,6 +37,13 @@ class TransportItem extends Model
     ];
 
     // Relationships
+
+    /** Report 79C: a reference to the asset register; never a hand-over by itself. */
+    public function asset(): BelongsTo
+    {
+        return $this->belongsTo(\App\Modules\Assets\Models\Asset::class)->withTrashed();
+    }
+
     public function logisticsTask(): BelongsTo
     {
         return $this->belongsTo(LogisticsTask::class);

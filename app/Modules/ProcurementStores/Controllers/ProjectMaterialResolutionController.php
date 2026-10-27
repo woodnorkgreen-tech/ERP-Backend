@@ -194,9 +194,21 @@ class ProjectMaterialResolutionController extends Controller
         if ($denied = $this->denied()) {
             return $denied;
         }
-        $validated = $request->validate(['name' => 'required|string|max:255', 'category_id' => 'nullable|integer']);
+        $validated = $request->validate([
+            'name' => 'required|string|max:255', 'category_id' => 'nullable|integer',
+            'base_uom_id' => 'nullable|integer', 'unit' => 'nullable|string|max:50',
+        ]);
 
-        return response()->json(['data' => $finder->candidates($validated['name'], $validated['category_id'] ?? null)]);
+        // Report 79C: the same verdict the registration gate will give on
+        // submit, so the items shown here are exactly the ones to acknowledge.
+        $check = app(\App\Modules\MaterialsLibrary\Services\MaterialDuplicateGuard::class)->check([
+            'material_name' => $validated['name'],
+            'material_category_id' => $validated['category_id'] ?? null,
+            'base_uom_id' => $validated['base_uom_id'] ?? null,
+            'unit_of_measure' => $validated['unit'] ?? null,
+        ]);
+
+        return response()->json(['data' => array_values(array_merge($check['exact'], $check['similar'])), 'verdict' => $check['verdict']]);
     }
 
     /** Non-stock / direct purchase, or back to awaiting resolution. */

@@ -27,6 +27,12 @@ class StoreMaterialRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Report 79C: the duplicate review — which similar items the person
+            // looked at, and why this is still a different material.
+            'duplicate_review' => 'nullable|array',
+            'duplicate_review.acknowledged' => 'nullable|array',
+            'duplicate_review.acknowledged.*' => 'integer',
+            'duplicate_review.reason' => 'nullable|string|max:500',
             // A catalogue row only needs a name to exist. Category is part of
             // the governance set checked by MaterialCompleteness at activation —
             // the moment stock movement becomes possible. Drafts may omit it and

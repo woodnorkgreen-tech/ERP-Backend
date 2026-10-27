@@ -66,6 +66,8 @@ class LibraryMaterial extends Model
      */
     protected $casts = [
         'attributes' => 'array',
+        // Report 79C: candidates reviewed and the reason a similar item was still registered.
+        'registration_review' => 'array',
         'unit_cost' => 'decimal:2',
         'default_unit_cost' => 'decimal:2',
         'is_active' => 'boolean',

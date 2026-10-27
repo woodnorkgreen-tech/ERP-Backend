@@ -7,6 +7,7 @@ use App\Modules\MaterialsLibrary\Models\LibraryMaterial;
 use App\Modules\Finance\CostCollector\Models\ExpenseCode;
 use App\Modules\Finance\CostCollector\Services\MaterialExpenseCodeResolver;
 use App\Modules\MaterialsLibrary\Services\MaterialPurchaseOptions;
+use App\Modules\MaterialsLibrary\Services\MaterialSearch;
 use App\Modules\ProcurementStores\Services\ProjectMaterialDemand;
 use Illuminate\Http\Request;
 
@@ -35,6 +36,7 @@ class MaterialOptionsController extends Controller
         MaterialExpenseCodeResolver $expenseCodes,
     ) {
         $search = trim((string) $request->input('search', ''));
+        $materialId = $request->integer('material_id');
 
         // Whether the line being filled sits on a job. The suggestion is only
         // useful if it is a code the requisition may actually carry — see
@@ -43,20 +45,39 @@ class MaterialOptionsController extends Controller
 
         // A picker with nothing typed asks for nothing: an unfiltered catalogue
         // read is a browse, and this endpoint is not the place to do one.
-        if (mb_strlen($search) < 2) {
+        if ($materialId <= 0 && mb_strlen($search) < 2) {
             return response()->json(['data' => []]);
         }
 
-        $materials = LibraryMaterial::query()
+        // Report 79B: planning screens (BOM, Resolve) may see items still
+        // Under Review, labelled, so nobody requests the same new material
+        // twice. A purchase never may: buying needs an Active item.
+        $includeUnderReview = $request->boolean('include_under_review');
+
+        $query = LibraryMaterial::query()
             // governed(), not active(): item_status is the authoritative flag,
             // and the legacy is_active scope still offers a retired material
             // whose old boolean was never cleared.
-            ->governed()
-            ->with(['stock', 'baseUom', 'purchaseUom', 'uomConversions', 'materialCategory.parent'])
-            ->search($search)
-            ->orderBy('material_name')
-            ->limit(self::LIMIT)
-            ->get();
+            ->where(function ($status) use ($includeUnderReview) {
+                $status->governed();
+                if ($includeUnderReview) {
+                    $status->orWhere('item_status', 'Under Review');
+                }
+            })
+            ->with(['stock', 'baseUom', 'purchaseUom', 'uomConversions', 'materialCategory.parent']);
+
+        // Ranked by how well each item matches what was typed — any word
+        // order, small typos, sizes kept apart — rather than A–Z on one
+        // phrase LIKE. Earlier BOM links of the same description count too.
+        // Resolve a material just registered in the requisition without a fuzzy
+        // search round trip. The same governance, unit and category rules apply.
+        $ranking = [];
+        if ($materialId > 0) {
+            $query->whereKey($materialId);
+        } else {
+            $ranking = app(MaterialSearch::class)->apply($query, $search, self::LIMIT, withHistory: $request->boolean('history'));
+        }
+        $materials = $query->limit(self::LIMIT)->get();
 
         // Resolved once per distinct category rather than per row: the catalogue
         // maps categories, not materials, so a page of boards would otherwise ask
@@ -76,7 +97,10 @@ class MaterialOptionsController extends Controller
             ->pendingByMaterial($materials->pluck('id')->all());
 
         return response()->json([
-            'data' => $materials->map(function (LibraryMaterial $material) use ($purchaseOptions, $expenseCodes, &$suggestions, $jobContext, $pendingDemand) {
+            // One clear answer, several close ones, or nothing: the screen
+            // says which, and never picks for the person.
+            'verdict' => app(MaterialSearch::class)->verdict($ranking),
+            'data' => $materials->map(function (LibraryMaterial $material) use ($purchaseOptions, $expenseCodes, &$suggestions, $jobContext, $pendingDemand, $ranking) {
                 $onHand = (float) ($material->stock?->quantity_on_hand ?? 0);
                 $reserved = (float) ($material->stock?->quantity_reserved ?? 0);
                 $pending = (float) ($pendingDemand[$material->id] ?? 0);
@@ -86,6 +110,11 @@ class MaterialOptionsController extends Controller
                     'material_code' => $material->material_code,
                     'material_name' => $material->material_name,
                     'category' => $material->category,
+                    'category_name' => $material->materialCategory?->name ?? $material->category,
+                    'item_status' => $material->item_status ?? 'Active',
+                    'unit_of_measure' => $material->baseUom?->code ?? $material->unit_of_measure,
+                    'specs' => $this->specs($material),
+                    'match' => $ranking[$material->id] ?? null,
                     'unit_cost' => (float) $material->unit_cost,
                     'base_uom_id' => $material->base_uom_id,
                     'base_uom' => $material->baseUom?->code,
@@ -118,6 +147,53 @@ class MaterialOptionsController extends Controller
                 ], $purchaseOptions->forMaterial($material));
             }),
         ]);
+    }
+
+    /**
+     * Report 79C — would registering this be a duplicate? The same verdict
+     * the registration gate gives on save, asked while the form is filled, so
+     * the warning and the refusal never disagree. Read only; open to anyone
+     * signed in, like the picker, since every creation screen needs it.
+     */
+    public function duplicates(Request $request)
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'category_id' => 'nullable|integer',
+            'base_uom_id' => 'nullable|integer',
+            'unit' => 'nullable|string|max:50',
+            'ignore_id' => 'nullable|integer',
+        ]);
+
+        if (mb_strlen(trim($validated['name'])) < 3) {
+            return response()->json(['verdict' => 'new', 'exact' => [], 'similar' => []]);
+        }
+
+        return response()->json(app(\App\Modules\MaterialsLibrary\Services\MaterialDuplicateGuard::class)->check([
+            'material_name' => $validated['name'],
+            'material_category_id' => $validated['category_id'] ?? null,
+            'base_uom_id' => $validated['base_uom_id'] ?? null,
+            'unit_of_measure' => $validated['unit'] ?? null,
+        ], isset($validated['ignore_id']) ? (int) $validated['ignore_id'] : null));
+    }
+
+    /** A few distinguishing specifications, so two similar names can be told apart. */
+    private function specs(LibraryMaterial $material): ?string
+    {
+        $attributes = $material->attributes ?? [];
+        $attributes = is_array($attributes['attributes'] ?? null) ? $attributes['attributes'] : $attributes;
+        $values = [];
+        foreach (['thickness_size', 'dimensions', 'container_size', 'color', 'finish_type', 'finish', 'description_spec'] as $key) {
+            $value = trim((string) (is_scalar($attributes[$key] ?? null) ? $attributes[$key] : ''));
+            if ($value !== '' && ! in_array($value, $values, true)) {
+                $values[] = mb_strimwidth($value, 0, 40, '…');
+            }
+            if (count($values) === 3) {
+                break;
+            }
+        }
+
+        return $values ? implode(' · ', $values) : null;
     }
 
     /**

@@ -154,6 +154,19 @@ class BillController extends Controller
             'payments.paymentSource:id,code,name,type', 'payments.createdBy:id,name',
         ]);
 
+        $searchTerm = trim((string) $request->input('searchTerm', ''));
+        $query->when($searchTerm !== '', function ($query) use ($searchTerm) {
+            $query->where(function ($query) use ($searchTerm) {
+                $query->where('bill_number', 'LIKE', '%' . $searchTerm . '%')
+                    ->orWhereHas('purchaseOrder', function ($q) use ($searchTerm) {
+                        $q->where('po_number', 'LIKE', '%' . $searchTerm . '%');
+                    })
+                    ->orWhereHas('supplier', function ($q) use ($searchTerm) {
+                        $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
+                    });
+            });
+        });
+
         if ($request->has('date_filter')) {
             $dateFilter = $request->input('date_filter');
             
@@ -181,31 +194,7 @@ class BillController extends Controller
 
     public function search(Request $request)
     {
-        $searchTerm = trim((string) $request->input('searchTerm', ''));
-        $perPage = min(max($request->integer('perPage', $request->integer('per_page', 20)), 1), 100);
-
-        $bills = Bill::with([
-            'purchaseOrder', 'supplier', 'createdBy:id,name',
-            // BillResource walks each payment's source and creator. Left to lazy
-            // loading that is two queries per payment, so a 100-bill page paid
-            // hundreds of round trips for two names.
-            'payments.paymentSource:id,code,name,type', 'payments.createdBy:id,name',
-        ])
-            ->when($searchTerm !== '', function ($query) use ($searchTerm) {
-                $query->where(function ($query) use ($searchTerm) {
-                    $query->where('bill_number', 'LIKE', '%' . $searchTerm . '%')
-                        ->orWhereHas('purchaseOrder', function ($q) use ($searchTerm) {
-                            $q->where('po_number', 'LIKE', '%' . $searchTerm . '%');
-                        })
-                        ->orWhereHas('supplier', function ($q) use ($searchTerm) {
-                            $q->where('supplier_name', 'LIKE', '%' . $searchTerm . '%');
-                        });
-                });
-            })
-            ->orderBy('created_at', 'desc')
-            ->paginate($perPage);
-
-        return BillResource::collection($bills)->preserveQuery();
+        return $this->index($request);
     }
 
     public function getPendingBills(Request $request, PurchaseOrderWorkflow $workflow)

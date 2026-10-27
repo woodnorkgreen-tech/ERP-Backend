@@ -221,7 +221,11 @@ final class MaterialWorkbookImportService
         }
         $validated = $validator->validate();
         if (! $material) {
-            app(MaterialRegistrationService::class)->create($validated, auth()->id());
+            // Report 79C: an exact duplicate is refused as a row error; a similar
+            // row imports with the look-alikes recorded against it.
+            app(MaterialRegistrationService::class)->create($validated, auth()->id(), [
+                'automatic_reason' => 'Imported from the material workbook while similar items existed.',
+            ]);
 
             return true;
         }

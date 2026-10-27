@@ -108,9 +108,9 @@ class AssetHireRequestService
     {
         $asset = Asset::findOrFail($data['asset_id']);
 
-        if (!$asset->is_available) {
-            throw new \Exception('This asset is not currently available.');
-        }
+        // Report 79B: an asset Retired, Lost or In Repair is not offered, even
+        // if its availability flag was never cleared.
+        $this->assertCanGoOut($asset);
 
         return AssetHireRequest::create([
             'asset_id' => $asset->id,
@@ -137,13 +137,23 @@ class AssetHireRequestService
         }
 
         DB::transaction(function () use ($request, $approver) {
+            // Report 79B: approval is the hand-over. Lock the asset and check
+            // it again here, so two approvals of different requests for the
+            // same asset cannot both hand it out.
+            $locked = AssetHireRequest::whereKey($request->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== AssetHireRequest::STATUS_PENDING) {
+                throw new \Exception('Only pending requests can be approved.');
+            }
+            $asset = Asset::whereKey($request->asset_id)->lockForUpdate()->firstOrFail();
+            $this->assertCanGoOut($asset);
+
             $request->update([
                 'status' => AssetHireRequest::STATUS_APPROVED,
                 'approved_by' => $approver->id,
                 'approved_at' => now(),
             ]);
 
-            $request->asset->update([
+            $asset->update([
                 'is_available' => false,
                 'updated_by' => $approver->id,
             ]);
@@ -165,6 +175,20 @@ class AssetHireRequestService
         });
 
         return $request->fresh();
+    }
+
+    /** In service and not already out with someone. */
+    private function assertCanGoOut(Asset $asset): void
+    {
+        if (! $asset->is_active || $asset->trashed()) {
+            throw new \Exception('This asset is no longer on the register.');
+        }
+        if ($asset->status !== 'Active') {
+            throw new \Exception("This asset is {$asset->status} and cannot be handed out.");
+        }
+        if (! $asset->is_available) {
+            throw new \Exception('This asset is not currently available.');
+        }
     }
 
     public function reject(AssetHireRequest $request, User $rejecter, ?string $reason): AssetHireRequest

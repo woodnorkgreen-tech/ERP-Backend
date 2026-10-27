@@ -825,4 +825,79 @@ class ResolveMaterialIntegrityTest extends TestCase
         $this->assertSame($timber->id, $fresh->library_material_id);
         $this->assertSame('2.400000', (string) $fresh->requirement_base_factor, 'the reading given at resolution is kept');
     }
+
+    /* ── Issuing in the unit the job asks for ────────────────────────── */
+
+    private function issueIn(ElementMaterial $line, LibraryMaterial $material, float $quantity, string $unit, array $extra = [])
+    {
+        return $this->postJson('/api/procurement-stores/movements', ['type' => 'issue', 'lines' => [array_merge([
+            'material_id' => $material->id, 'project_material_id' => $line->id, 'project_id' => $this->projectId,
+            'quantity' => $quantity, 'entered_uom_id' => $this->uom($unit), 'recipient_name' => 'Otieno', 'reference_no' => 'WNG-78B-001',
+        ], $extra)]]);
+    }
+
+    private function onHand(LibraryMaterial $material): float
+    {
+        return (float) Stock::where('material_id', $material->id)->value('quantity_on_hand');
+    }
+
+    public function test_a_material_can_be_issued_in_any_unit_it_converts_within_the_job_limit(): void
+    {
+        // Jumper wire is stocked by the metre; a roll is 100 m. The job needs 250 m.
+        $wire = $this->material('Jumper wire', 'm', 500);
+        $this->convert($wire, 'roll', 100);
+        $line = $this->line('Jumper wire', 'm', 250, $wire->id);
+
+        $this->issueIn($line, $wire, 2, 'roll')->assertOk();
+        $this->assertSame(300.0, $this->onHand($wire));
+        $log = DB::table('inventory_logs')->where('project_material_id', $line->id)->first();
+        $this->assertSame(-2.0, (float) $log->entered_quantity, 'entered as 2 rolls out');
+        $this->assertSame($this->uom('roll'), (int) $log->entered_uom_id);
+
+        // A third roll would be 300 m against 250 m: refused. The rest goes in metres.
+        $this->issueIn($line, $wire, 1, 'roll')->assertStatus(422);
+        $this->issueIn($line, $wire, 50, 'm')->assertOk();
+        $this->assertSame(250.0, $this->onHand($wire));
+    }
+
+    public function test_a_line_can_be_issued_in_its_own_unit_through_its_reading(): void
+    {
+        $line = $this->line('Timber 2x2', 'pcs', 10);
+        $timber = $this->material('Cypress 2x2', 'm', 100);
+        $this->resolve($line, ['material_id' => $timber->id, 'factor' => 2.4])->assertOk();
+
+        $this->issueIn($line->fresh(), $timber, 4, 'pcs')->assertOk();
+        $this->assertEqualsWithDelta(90.4, $this->onHand($timber), 0.0001);
+        $this->issueIn($line->fresh(), $timber, 7, 'pcs')->assertStatus(422); // 11 pcs > 10 required
+    }
+
+    public function test_a_client_cannot_supply_its_own_conversion(): void
+    {
+        $wire = $this->material('Jumper wire', 'm', 500);
+        $this->convert($wire, 'roll', 100);
+        $line = $this->line('Jumper wire', 'm', 250, $wire->id);
+
+        $this->issueIn($line, $wire, 1, 'roll', ['entered_conversion_factor' => 1])->assertOk();
+        $this->assertSame(400.0, $this->onHand($wire), 'one roll is 100 m whatever the request says');
+        // A unit the material does not convert is refused, not guessed.
+        $this->issueIn($line, $wire, 1, 'kg')->assertStatus(422);
+    }
+
+    public function test_each_line_lists_the_units_it_can_be_issued_in(): void
+    {
+        $wire = $this->material('Jumper wire', 'm', 500);
+        $this->convert($wire, 'roll', 100);
+        $wireLine = $this->line('Jumper wire', 'm', 250, $wire->id);
+        $timberLine = $this->line('Timber 2x2', 'pcs', 10);
+        $timber = $this->material('Cypress 2x2', 'm', 100);
+        $this->resolve($timberLine, ['material_id' => $timber->id, 'factor' => 2.4])->assertOk();
+
+        $lines = collect($this->getJson("/api/projects/tasks/{$this->taskId}/materials")->assertOk()->json('data.projectElements.0.materials'))->keyBy('id');
+        $this->assertEqualsCanonicalizing(
+            [['code' => 'm', 'factor' => 1, 'basis' => 'stock'], ['code' => 'roll', 'factor' => 100, 'basis' => 'material']],
+            collect($lines[(string) $wireLine->id]['issueUnits'])->map(fn ($u) => ['code' => $u['code'], 'factor' => $u['factor'], 'basis' => $u['basis']])->all(),
+        );
+        $this->assertContains(['code' => 'pcs', 'factor' => 2.4, 'basis' => 'line'],
+            collect($lines[(string) $timberLine->id]['issueUnits'])->map(fn ($u) => ['code' => $u['code'], 'factor' => $u['factor'], 'basis' => $u['basis']])->all());
+    }
 }
