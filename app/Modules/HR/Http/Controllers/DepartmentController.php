@@ -3,6 +3,7 @@
 namespace App\Modules\HR\Http\Controllers;
 
 use App\Modules\HR\Models\Department;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -29,6 +30,20 @@ class DepartmentController
 
         $query = Department::with(['manager', 'employees']);
 
+        // The existing user_count below is the number of HR employee records.
+        // User management's distribution needs active login accounts instead,
+        // so attach that separate count without changing other consumers.
+        $activeUserCounts = User::query()
+            ->selectRaw('department_id, COUNT(*) as active_user_count')
+            ->where('is_active', true)
+            ->whereNotNull('department_id')
+            ->groupBy('department_id')
+            ->pluck('active_user_count', 'department_id');
+        $attachActiveUserCount = static function ($department) use ($activeUserCounts) {
+            $department->active_user_count = (int) ($activeUserCounts[$department->id] ?? 0);
+            return $department;
+        };
+
         // Apply filters
         if ($request->has('search') && $request->search) {
             $search = $request->search;
@@ -52,9 +67,9 @@ class DepartmentController
         // By default, if no pagination params are sent, return all departments for dropdowns
         if (!$request->has('per_page') && !$request->has('page')) {
             $departments = $query->get();
-            $departments->transform(function ($department) {
+            $departments->transform(function ($department) use ($attachActiveUserCount) {
                 $department->user_count = $department->employees->count();
-                return $department;
+                return $attachActiveUserCount($department);
             });
             return response()->json([
                 'data' => $departments
@@ -64,9 +79,9 @@ class DepartmentController
         $perPage = $request->get('per_page');
         if ($perPage === 'all') {
             $departments = $query->get();
-            $departments->transform(function ($department) {
+            $departments->transform(function ($department) use ($attachActiveUserCount) {
                 $department->user_count = $department->employees->count();
-                return $department;
+                return $attachActiveUserCount($department);
             });
             return response()->json([
                 'data' => $departments
@@ -76,9 +91,9 @@ class DepartmentController
         $departments = $query->paginate($perPage ?? 1000);
 
         // Add user_count to each department
-        $departments->getCollection()->transform(function ($department) {
+        $departments->getCollection()->transform(function ($department) use ($attachActiveUserCount) {
             $department->user_count = $department->employees->count();
-            return $department;
+            return $attachActiveUserCount($department);
         });
 
         return response()->json([
