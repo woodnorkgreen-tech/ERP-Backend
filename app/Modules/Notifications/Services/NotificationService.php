@@ -109,6 +109,11 @@ class NotificationService
                 SendPushNotificationJob::dispatch($user->id, $payload);
             }
 
+            // SMS goes alongside the channels above; it never replaces or changes them.
+            if (SmsNotifier::shouldText($module, $type)) {
+                SmsNotifier::toUsers([$user->id], SmsNotifier::messageFor($payload, $user));
+            }
+
             return $notification;
         })->filter()->values();
 

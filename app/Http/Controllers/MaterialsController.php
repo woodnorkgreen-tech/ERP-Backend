@@ -1586,6 +1586,11 @@ class MaterialsController extends Controller
             $projectInfo['approval_status'] = $approvalStatus;
             $materialsData->update(['project_info' => $projectInfo]);
 
+            // SMS only (in-app notifications are unchanged): tell Production when their approval is
+            // needed, and tell whoever asked for approval when it has been given.
+            $smsActorId = $user->id;
+            DB::afterCommit(fn () => $this->smsMaterialsApproval($taskId, $department, $approvalStatus, $smsActorId));
+
             // If fully approved, trigger budget sync and additions creation
             if ($allApproved) {
                 \Log::info('Materials fully approved - triggering budget sync', ['taskId' => $taskId]);
@@ -1677,6 +1682,61 @@ class MaterialsController extends Controller
                 'message' => 'Failed to approve materials',
                 'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
             ], 500);
+        }
+    }
+
+    /**
+     * Texts the right people after a material list approval. Never throws: an SMS problem
+     * must not undo or hide an approval.
+     */
+    private function smsMaterialsApproval(int $taskId, string $department, array $status, int $actorId): void
+    {
+        try {
+            $task = EnquiryTask::with(['enquiry', 'assignedUsers'])->find($taskId);
+            if (! $task) {
+                return;
+            }
+
+            $enquiry = $task->enquiry;
+            $label = trim($enquiry?->title ?: 'a project');
+            $poDone = (bool) ($status['project_officer']['approved'] ?? false);
+            $prodDone = (bool) ($status['production']['approved'] ?? false);
+
+            // Whoever asked for the approval: the people on the materials task and the project officer.
+            $requesters = collect([$task->assigned_user_id, $task->assigned_to, $enquiry?->project_officer_id])
+                ->merge($task->assignedUsers->pluck('id'))
+                ->filter()
+                ->unique();
+
+            $actorName = \App\Models\User::query()->whereKey($actorId)->value('name') ?: 'Someone';
+            $notIn = fn ($ids) => collect($ids)->filter()->unique()->reject(fn ($id) => (int) $id === $actorId)->values();
+
+            if ($poDone && $prodDone) {
+                $ids = $notIn($requesters->merge([
+                    $status['project_officer']['approved_by'] ?? null,
+                    $status['production']['approved_by'] ?? null,
+                ]));
+                \App\Modules\Notifications\Services\SmsNotifier::toUsers(
+                    $ids,
+                    "Hello {name}, the material list for {$label} is fully approved (Project Officer and Production)."
+                );
+            } elseif ($department === 'project_officer' && ! $prodDone) {
+                $production = \App\Modules\Notifications\Services\SmsNotifier::departmentUserIds(
+                    (array) config('sms_notifications.production_department_keywords', ['production']),
+                    (array) config('sms_notifications.production_roles', ['Production'])
+                );
+                \App\Modules\Notifications\Services\SmsNotifier::toUsers(
+                    $notIn($production),
+                    "Hello {name}, {$actorName} approved the material list for {$label}. It needs Production approval. Please review and approve it on the ERP or the Woodnork Green app."
+                );
+            } elseif ($department === 'production' && ! $poDone) {
+                \App\Modules\Notifications\Services\SmsNotifier::toUsers(
+                    $notIn($requesters),
+                    "Hello {name}, Production ({$actorName}) approved the material list for {$label}. Project Officer approval is still needed on the ERP or the Woodnork Green app."
+                );
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('Material list approval SMS failed', ['task_id' => $taskId, 'error' => $e->getMessage()]);
         }
     }
 
