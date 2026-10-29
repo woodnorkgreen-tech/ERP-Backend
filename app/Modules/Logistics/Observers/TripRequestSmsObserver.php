@@ -3,14 +3,18 @@
 namespace App\Modules\Logistics\Observers;
 
 use App\Modules\Logistics\Jobs\SendSms;
+use App\Modules\Logistics\Jobs\SendWhatsApp;
 use App\Modules\Logistics\Models\TripRequest;
 use App\Modules\Logistics\Services\SmsService;
+use App\Modules\Logistics\Services\WhatsAppService;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * SMS only. In-app notifications are untouched; this just texts the people
- * who need to act when a trip request changes status.
+ * Texts the people who need to act when a trip request changes status:
+ * WhatsApp when it is switched on (with an SMS fallback), otherwise SMS.
+ * In-app notifications are untouched. It runs after the response is sent
+ * and never breaks the save.
  */
 class TripRequestSmsObserver
 {
@@ -20,17 +24,38 @@ class TripRequestSmsObserver
             return;
         }
 
-        $this->sendSms($trip);
+        $this->notify($trip);
     }
 
     /**
-     * Text the people who need to act or know. Only the key moments, since
-     * every SMS costs credit; everything else stays in the app. It runs after
-     * the response is sent and never breaks the save.
+     * One person, one message: WhatsApp template if enabled, else SMS.
+     *
+     * @param  string[]  $params  fills the template's {{1}}, {{2}}…
      */
-    private function sendSms(TripRequest $trip): void
+    private function send(?string $phone, string $templateKey, array $params, string $smsText, ?string $name = null): void
     {
-        if (!SmsService::enabled()) {
+        if (WhatsAppService::enabled()) {
+            if (config('logistics.whatsapp.mode') === 'notice') {
+                // One flexible template: "Hello {{1}}, {{2}}. Open the ERP app for more details."
+                $msg = preg_replace('/^Woodnork:\s*/', '', $smsText);
+                $msg = preg_replace('/\s*Open the app for details\.?$/', '', $msg);
+                SendWhatsApp::dispatchAfterResponse($phone, 'notice', [], trim($msg), $name);
+                return;
+            }
+            SendWhatsApp::dispatchAfterResponse(
+                $phone,
+                (string) config("logistics.whatsapp.templates.{$templateKey}"),
+                $params,
+                $smsText
+            );
+            return;
+        }
+        SendSms::dispatchAfterResponse($phone, $smsText);
+    }
+
+    private function notify(TripRequest $trip): void
+    {
+        if (!WhatsAppService::enabled() && !SmsService::enabled()) {
             return;
         }
 
@@ -40,16 +65,16 @@ class TripRequestSmsObserver
             $code      = $trip->request_code;
             $dest      = $trip->destination;
             $requester = $trip->requestedBy?->phone;
+            $reqName   = $trip->requestedBy?->name
+                ?? trim(($trip->requestedBy?->first_name ?? '') . ' ' . ($trip->requestedBy?->last_name ?? ''));
             $driver    = $trip->assignedDriver?->employee?->phone;
             $driverName = $trip->assignedDriver?->employee?->name
                 ?? trim(($trip->assignedDriver?->employee?->first_name ?? '') . ' ' . ($trip->assignedDriver?->employee?->last_name ?? ''));
             $plate     = $trip->assignedVehicle?->plate_number;
-            $reqName   = $trip->requestedBy?->name
-                ?? trim(($trip->requestedBy?->first_name ?? '') . ' ' . ($trip->requestedBy?->last_name ?? ''));
 
             // "Project: X (JOB-12) | Client: Y | Venue: Z", skipping what is missing.
-            $p       = $trip->project;
-            $parts   = [];
+            $p     = $trip->project;
+            $parts = [];
             if ($p?->title) {
                 $parts[] = 'Project: ' . $p->title . ($p->job_number ? " ({$p->job_number})" : '');
             } elseif ($trip->delivery_type_label) {
@@ -64,41 +89,60 @@ class TripRequestSmsObserver
             $about = implode(' | ', $parts);
             $about = $about !== '' ? " {$about}." : '';
 
-            $route = trim(($trip->pickup_location ?: '') . ($trip->pickup_location && $dest ? ' to ' : '') . ($dest ?: ''));
-            $route = $route !== '' ? " Route: {$route}." : '';
+            $routeText = trim(($trip->pickup_location ?: '') . ($trip->pickup_location && $dest ? ' to ' : '') . ($dest ?: ''));
+            $route     = $routeText !== '' ? " Route: {$routeText}." : '';
 
             $needed = $trip->time_tbc
                 ? ' Time: to be communicated.'
                 : ($trip->required_delivery_at ? ' Needed by ' . $trip->required_delivery_at->format('D d M, H:i') . '.' : '');
+            $neededShort = $trip->time_tbc
+                ? 'To be communicated'
+                : ($trip->required_delivery_at ? $trip->required_delivery_at->format('D d M, H:i') : '-');
+
+            // Template values (single line each).
+            $projectVal = $p?->title ? $p->title . ($p->job_number ? " ({$p->job_number})" : '') : ($trip->delivery_type_label ?: '-');
+            $clientVal  = $p?->client?->full_name ?: '-';
+            $routeVal   = $routeText !== '' ? $routeText : '-';
+            $update = fn (string $what) => [$code, $what, $projectVal, $clientVal, $routeVal];
 
             switch ($trip->status) {
                 case 'approved':
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} approved.{$about}{$route}{$needed} A driver and vehicle will be assigned shortly.");
+                    $this->send($requester, 'update', $update('approved'),
+                        "Woodnork: Trip {$code} approved.{$about}{$route}{$needed} A driver and vehicle will be assigned shortly.", $reqName);
                     break;
 
                 case 'rejected':
                     $why = $trip->rejection_reason ? " Reason: {$trip->rejection_reason}" : '';
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} was not approved.{$about}{$why}");
+                    $this->send($requester, 'update', $update('not approved' . ($trip->rejection_reason ? " ({$trip->rejection_reason})" : '')),
+                        "Woodnork: Trip {$code} was not approved.{$about}{$why}", $reqName);
                     break;
 
                 case 'assigned':
                     $veh = $plate ? " Vehicle: {$plate}." : '';
                     $who = $reqName ? " Requested by {$reqName}" . ($requester ? " ({$requester})" : '') . '.' : '';
-                    SendSms::dispatchAfterResponse($driver, "Woodnork: New trip {$code}.{$about}{$route}{$needed}{$veh}{$who} Open the app for details.");
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} assigned.{$about}{$route}{$needed}" . ($driverName ? " Driver: {$driverName}." : '') . $veh);
+                    $this->send($driver, 'driver_assigned', [
+                        $code, $projectVal, $clientVal, $routeVal, $neededShort,
+                        $plate ?: 'To be confirmed',
+                        $reqName ? $reqName . ($requester ? " ({$requester})" : '') : '-',
+                    ], "Woodnork: New trip {$code}.{$about}{$route}{$needed}{$veh}{$who} Open the app for details.", $driverName);
+                    $assignedTo = 'assigned' . ($driverName ? " to {$driverName}" : '') . ($plate ? " (vehicle {$plate})" : '');
+                    $this->send($requester, 'update', $update($assignedTo),
+                        "Woodnork: Trip {$code} assigned.{$about}{$route}{$needed}" . ($driverName ? " Driver: {$driverName}." : '') . $veh, $reqName);
                     break;
 
                 case 'completed':
-                    SendSms::dispatchAfterResponse($requester, "Woodnork: Trip {$code} completed.{$about}{$route}");
+                    $this->send($requester, 'update', $update('completed'),
+                        "Woodnork: Trip {$code} completed.{$about}{$route}", $reqName);
                     break;
 
                 case 'cancelled':
                     // Only the driver needs telling, and only if one was assigned.
-                    SendSms::dispatchAfterResponse($driver, "Woodnork: Trip {$code} has been cancelled.{$about}{$route}{$needed}");
+                    $this->send($driver, 'update', $update('cancelled'),
+                        "Woodnork: Trip {$code} has been cancelled.{$about}{$route}{$needed}", $driverName);
                     break;
             }
         } catch (Throwable $e) {
-            Log::warning('Trip SMS failed', ['trip_request_id' => $trip->id, 'error' => $e->getMessage()]);
+            Log::warning('Trip notification failed', ['trip_request_id' => $trip->id, 'error' => $e->getMessage()]);
         }
     }
 }

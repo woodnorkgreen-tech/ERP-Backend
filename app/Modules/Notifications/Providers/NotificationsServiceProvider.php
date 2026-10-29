@@ -17,6 +17,9 @@ class NotificationsServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(__DIR__ . '/../Database/Migrations');
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'notifications');
 
+        // Texts the requester when their request is approved, rejected or paid out.
+        \App\Modules\Notifications\Services\ApprovalSms::register();
+
         Route::middleware(['api', 'auth:sanctum'])
             ->prefix('api')
             ->group(__DIR__ . '/../Routes/api.php');
